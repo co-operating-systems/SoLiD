@@ -48,7 +48,7 @@ object ApplicationBuild extends Build {
 
   def banana(names: String*)=
     names.map("org.w3" %% _ % "0.7.2-SNAPSHOT" excludeAll (ExclusionRule(organization = "org.scala-stm")))
-  def akka(names: String*) = names.map("com.typesafe.akka" %% _ % "2.4.2")
+  def akka(names: String*) = names.map("com.typesafe.akka" %% _ % "2.4-SNAPSHOT")
   def semargl(name: String) = "org.semarglproject" % {"semargl-"+name} % "0.6.1"
 
   //see http://bblfish.net/work/repo
@@ -63,7 +63,7 @@ object ApplicationBuild extends Build {
     )
 
   val appDependencies = //banana("sesame", "jena", "plantain_jvm", "ntriples_jvm") ++
-    akka("akka-actor", "akka-http-core","akka-http-testkit","akka-http-xml-experimental") ++
+    akka("akka-actor", "akka-http-core","akka-http-testkit-experimental") ++
     //  Seq("core",)
     Seq(
       "net.rootdev" % "java-rdfa" % "0.4.2-RC2",
@@ -72,8 +72,6 @@ object ApplicationBuild extends Build {
       "org.bouncycastle" % "bcprov-jdk15on" % "1.51",
       "org.bouncycastle" % "bcpkix-jdk15on" % "1.51",
       "net.sf.uadetector" % "uadetector-resources" % "2014.01",
-//      playTLS("play-iteratees"),
-//      playTLS("play-ws"),
       scalatest,
       // https://code.google.com/p/guava-libraries/
       "com.google.guava" % "guava" % "17.0",

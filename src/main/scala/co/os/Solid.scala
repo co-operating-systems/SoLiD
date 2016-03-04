@@ -1,17 +1,33 @@
 package co.os
 
-import java.nio.file.{Path => FPath, Files, Paths}
+import java.io.{File, FileInputStream}
+import java.nio.file.{Files, Path => FPath}
+import java.security.{Principal, SecureRandom, KeyStore}
+import java.security.cert.X509Certificate
+import javax.net.ssl.{SSLContext, KeyManagerFactory, X509TrustManager}
 
 import akka.actor._
-import akka.http.scaladsl.Http
+import akka.http.scaladsl.{HttpsConnectionContext, Http}
 import akka.http.scaladsl.model.Uri.Path._
 import akka.http.scaladsl.model._
+import akka.http.scaladsl.model.headers._
 import akka.stream.ActorMaterializer
 import akka.util.Timeout
+import com.typesafe.config.{Config, ConfigFactory}
 
 import scala.concurrent.Future
+import scala.util.control.NonFatal
+import scala.util.{Failure, Success}
 
 object Solid  {
+
+  val testConf: Config = ConfigFactory.parseString(
+    """
+    akka.loglevel = INFO
+    akka.log-dead-letters = off
+    akka.http.server.parsing.tls-session-info-header = on
+    """
+  )
 
   def main(args: Array[String]) {
     val path = java.nio.file.Paths.get(args(0))
@@ -20,17 +36,18 @@ object Solid  {
       println(s"could not find directory <$path>")
     }
 
-    implicit val system = ActorSystem("my-system")
+    implicit val system = ActorSystem("my-system",testConf)
     implicit val materializer = ActorMaterializer()
     implicit val ec = system.dispatcher
 
-    val uri = Uri("http://localhost:8080")
+    val uri = Uri("https://localhost:8443")
     val solid = Solid(uri, Props(new LDPCActor(uri, path)),"SoLiD")
 
     val bindingFuture = Http().bindAndHandleAsync(
       req => solid.handle(req),
-      interface = "localhost",
-      port = 8080
+      interface = uri.authority.host.address(),
+      port = uri.authority.port,
+      connectionContext = servercontext
     )
 
 // low level version:
@@ -38,7 +55,7 @@ object Solid  {
 //      connection handleWithAsyncHandler (req => solid.handle(req))
 //    }).run()
 
-    println(s"Server online at http://localhost:8080/\nPress RETURN to stop...")
+    println(s"Server online at ${uri.toString()}\nPress RETURN to stop...")
     scala.io.StdIn.readLine() // for the future transformations
 
     bindingFuture.flatMap(_.unbind()) // trigger unbinding from the port
@@ -57,7 +74,48 @@ object Solid  {
   }
 
   def toMessage(req: HttpRequest) = Message(pathToList(req.uri.path).filter(_ != "/"),req)
+
+  def servercontext = {
+    val context = SSLContext.getInstance("TLS")
+    keyManager("conf/generated.keystore","password").map { kmf=>
+      context.init(kmf.getKeyManagers, Array(noCATrustManager), new SecureRandom)
+    }.get
+    new HttpsConnectionContext(context)
+  }
+
+  def keyManager(path: String, password: String) = {
+    val keyStore = KeyStore.getInstance(System.getProperty("https.keyStoreType", "JKS"))
+//    val password = System.getProperty("https.keyStorePassword", "").toCharArray
+    val algorithm = System.getProperty("https.keyStoreAlgorithm", KeyManagerFactory.getDefaultAlgorithm)
+
+    val file = new File(path)
+    if (file.isFile) {
+      val in = new FileInputStream(file)
+      try {
+        keyStore.load(in, password.toCharArray)
+        val kmf = KeyManagerFactory.getInstance(algorithm)
+        kmf.init(keyStore, password.toCharArray)
+        Success(kmf)
+      } catch {
+        case NonFatal(e) => {
+          Failure(new Exception("Error loading HTTPS keystore from " + file.getAbsolutePath, e))
+        }
+      } finally {
+        in.close()
+      }
+    } else {
+      Failure(new Exception("Unable to find HTTPS keystore at \"" + file.getAbsolutePath + "\""))
+    }
+  }
 }
+
+object noCATrustManager extends X509TrustManager {
+  val nullArray = Array[X509Certificate]()
+  def checkClientTrusted(x509Certificates: Array[X509Certificate], s: String) {}
+  def checkServerTrusted(x509Certificates: Array[X509Certificate], s: String) {}
+  def getAcceptedIssuers() = nullArray
+}
+
 
 case class Solid(baseUri: Uri, ldpc: Props, name: String) {
   import akka.pattern.ask
@@ -147,15 +205,25 @@ class LDPRActor(ldprUri: Uri, path: FPath) extends BaseActor {
     }
     case req@HttpRequest(GET,uri,headers,entity,protocol) => {
        context.sender ! {
-         import MediaTypes._
-         if (ldprUri.path == uri.path) HttpResponse(OK,
-           entity = HttpEntity(
-             //todo: encode mime type in file name or somewhere
-             contentType=ContentType(mediaType(path),()=>HttpCharsets.`UTF-8`),
-             path.toFile
-           )
-         )
-         else HttpResponse(NotFound, entity = s"could not find $req")
+         if (ldprUri.path == uri.path) {
+           def responseForPrincipal(principal: Principal): HttpResponse =
+             HttpResponse(entity = s"Hello ${principal.getName}!")
+
+           req.header[`Tls-Session-Info`] match {
+             case Some(infoHeader) if infoHeader.peerPrincipal.isDefined ⇒
+               responseForPrincipal(infoHeader.peerPrincipal.get)
+//               HttpResponse(OK,
+//                 entity = HttpEntity(
+//                   //todo: encode mime type in file name or somewhere
+//                   contentType=ContentType(mediaType(path),()=>HttpCharsets.`UTF-8`),
+//                   path.toFile
+//                 )
+//               )
+             case _ ⇒
+               println("requesting client certificate!!!")
+               HttpResponse(headers = RequestClientCertificate(req) :: Nil)
+           }
+         } else HttpResponse(NotFound, entity = s"could not find $req")
        }
     }
     case other =>  context.sender ! HttpResponse(BadRequest, entity=s"Bad request $other")
