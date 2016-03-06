@@ -1,7 +1,14 @@
-## SoLid implementation in akka
+## SoLiD implementation in akka
 
 Initial [SoLiD](https://github.com/solid/solid-spec) implementation with [akka](http://akka.io/).
 
+### Prerequisits
+
+This version requires a version of akka that integrates the patch [in akka PR19787](https://github.com/akka/akka/pull/19787). Clone the git repo spray/akka, checkout [w/18351-implement-dynamic-client-certificates](https://github.com/spray/akka/commits/w/18351-implement-dynamic-client-certificates), and then run
+
+```
+$ sbt -Dakka.scaladoc.diagrams=false publishLocal
+```
 
 ### Run
 
