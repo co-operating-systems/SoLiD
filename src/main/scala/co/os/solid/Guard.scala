@@ -5,10 +5,11 @@ import java.security.cert.X509Certificate
 
 import akka.http.javadsl.model.ResponseEntity
 import akka.http.scaladsl.model
+import akka.http.scaladsl.model.HttpHeader.ParsingResult.Ok
 import akka.http.scaladsl.model.HttpMethods._
 import akka.http.scaladsl.model.StatusCodes._
 import akka.http.scaladsl.model.headers.{RequestClientCertificate, `Tls-Session-Info`}
-import akka.http.scaladsl.model.{HttpRequest, HttpResponse, Uri}
+import akka.http.scaladsl.model.{HttpHeader, HttpRequest, HttpResponse, Uri}
 
 /**
   * A guard for a resource.
@@ -40,10 +41,12 @@ class Guard(forResource: Uri, acls: List[Uri]) extends BaseActor {
               case None => sender ! HttpResponse(Unauthorized,entity="no Certs")
             }
           }
-          case _ ⇒ {
+          case _ if !req.headers.contains(XCert)  ⇒ {
             log.info("requesting client certificate!!!")
-            sender ! HttpResponse(headers = RequestClientCertificate(req) :: Nil)
+            sender ! HttpResponse(headers = RequestClientCertificate(req.addHeader(XCert)) :: Nil)
           }
+          case _ => sender ! HttpResponse(Unauthorized,
+            entity="The client certificate was requested but not found")
         }
       } else {
         context.parent forward Authorized(req)
@@ -58,6 +61,11 @@ case class Authorized(httpreq: HttpRequest)
 
 
 object Guard {
+
+  val XCert = HttpHeader.parse("X-CertRequested","1") match {
+    case Ok(h,e) => h
+  }
+
 
   def extractWebIds(x509: X509Certificate): List[(String, PublicKey)] =
       Option(x509.getSubjectAlternativeNames).toList.flatMap { collOfNames =>
