@@ -1,6 +1,7 @@
 package co.os
 
 import java.io.{File, FileInputStream}
+import java.nio.file.Files
 import java.security.{Principal, SecureRandom, KeyStore}
 import java.security.cert.X509Certificate
 import javax.net.ssl.{SSLContext, KeyManagerFactory, X509TrustManager}

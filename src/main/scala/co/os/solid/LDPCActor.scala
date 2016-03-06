@@ -3,7 +3,7 @@ package co.os.solid
 import java.nio.file.{Files, Path => FPath}
 
 
-import akka.actor.Props
+import akka.actor.{Actor, Props}
 import akka.http.scaladsl.model._
 
 /**
@@ -12,7 +12,7 @@ import akka.http.scaladsl.model._
 class LDPCActor(ldpcUri: Uri, root: FPath) extends LDPRActor(ldpcUri,root) {
   import HttpMethods._
   import StatusCodes._
-  println(s"created LDPC($ldpcUri,$root)")
+  log.info(s"created LDPC($ldpcUri,$root)")
 
   override
   def receive = returnErrors {
@@ -28,7 +28,7 @@ class LDPCActor(ldpcUri: Uri, root: FPath) extends LDPRActor(ldpcUri,root) {
             }
             case other => {
               val file = root.resolve(head)
-              println(s"${msg.message} has checking file=$file")
+              log.info(s"${msg.message} has checking file=$file")
               if (Files.exists(file)) {
                 val newref = if (Files.isDirectory(file)) {
                   context.actorOf(Props(new LDPCActor(ldpcUri.withPath(ldpcUri.path/head), file)), head)
@@ -44,7 +44,7 @@ class LDPCActor(ldpcUri: Uri, root: FPath) extends LDPRActor(ldpcUri,root) {
         }
     }
     case req@HttpRequest(method,uri,headers,entity,protocol) =>
-      context.sender() ! {
+      context.sender ! {
         if (uri.path == ldpcUri.path)
           HttpResponse(OK, entity = s"Container received $req")
         else {
@@ -53,3 +53,5 @@ class LDPCActor(ldpcUri: Uri, root: FPath) extends LDPRActor(ldpcUri,root) {
       }
   }
 }
+
+
