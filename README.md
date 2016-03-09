@@ -1,6 +1,7 @@
 ## SoLiD implementation in akka
 
 Initial [SoLiD](https://github.com/solid/solid-spec) implementation with [akka](http://akka.io/).
+This is a re-write of [rww-play](https://github.com/read-write-web/rww-play).
 
 ### Prerequisits
 
