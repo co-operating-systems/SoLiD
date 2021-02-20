@@ -1,6 +1,7 @@
 ## SoLiD implementation in akka
 
 Initial [SoLiD](https://github.com/solid/solid-spec) implementation with [akka](http://akka.io/).
+This is a re-write of [rww-play](https://github.com/read-write-web/rww-play).
 
 Reactive Solid is developed as part of the [Solid-Control](https://nlnet.nl/project/SolidControl/) project, which was funded by the the [Next Generation Internet (NGI0)](https://nlnet.nl/NGI0/) in their [Privacy and Trust Enhancing Technologies (PET)](https://nlnet.nl/PET/) call.
 
