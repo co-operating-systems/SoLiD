@@ -1,28 +1,32 @@
 package run.cosy
 
 import akka.Done
-import akka.actor.CoordinatedShutdown
+import akka.actor.{CoordinatedShutdown}
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors, LoggerOps}
-import akka.actor.typed._
+import akka.actor.typed.{Behavior, ActorRef, ActorSystem, Scheduler, PostStop}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.Http.ServerBinding
 import akka.http.scaladsl.model.Uri.Path.{Empty, Segment, Slash}
-import akka.http.scaladsl.model._
-import akka.http.scaladsl.server.Directives._
+import akka.http.scaladsl.model
+import akka.http.scaladsl.model.{HttpResponse, Uri}
+import akka.http.scaladsl.server.Directives
 import akka.http.scaladsl.server.{RequestContext, Route, RouteResult}
 import akka.http.scaladsl.util.FastFuture
 import akka.util.Timeout
+import cats.data.NonEmptyList
 import com.typesafe.config.{Config, ConfigFactory}
-import run.cosy.ldp
+import run.cosy.ldp.{FSContainer, ResourceRegistry}
 
 import java.io.{File, FileInputStream}
 import java.nio.file.{Files, Path}
+import scala.annotation.tailrec
 import scala.concurrent.{ExecutionContext, Future}
 import scala.io.StdIn
 import scala.util.{Failure, Success}
 
 
 object Solid {
+	//todo: make @tailrec
 	def pathToList(path: Uri.Path): List[String] = path match {
 		case Empty => Nil
 		case Segment(head, tail) => head :: pathToList(tail)
@@ -32,8 +36,10 @@ object Solid {
 	def apply(uri: Uri, fpath: Path): Behavior[Run] =
 		Behaviors.setup { (ctx: ActorContext[Run]) =>
 			given system: ActorSystem[Nothing] = ctx.system
-			val rootRef: ActorRef[ldp.Container.Cmd] = ctx.spawn(ldp.Container(uri, fpath), "root")
-			val registry = ldp.ContainerRegistry(system)
+			given reg : ResourceRegistry = ResourceRegistry(ctx.system)
+			val withoutSlash = uri.withPath(uri.path.reverse.dropChars(1).reverse)
+			val rootRef: ActorRef[FSContainer.Cmd] = ctx.spawn(FSContainer(withoutSlash, fpath), "solid")
+			val registry = ResourceRegistry(system)
 			val solid = new Solid(fpath, uri, registry, rootRef)
 			given timeout: Scheduler = system.scheduler
 			given ec: ExecutionContext = ctx.executionContext
@@ -126,28 +132,30 @@ object Solid {
  */
 class Solid(path: Path,
             baseUri: Uri,
-            registry: ldp.ContainerRegistry,
-            rootRef: ActorRef[ldp.Container.Cmd])(using sys: ActorSystem[_]) {
+            registry: ResourceRegistry,
+            rootRef: ActorRef[FSContainer.Cmd])(using sys: ActorSystem[_]) {
 
 	import akka.actor.typed.scaladsl.AskPattern.{Askable, schedulerFromActorSystem}
 	import akka.pattern.ask
 
-	import scala.concurrent.duration._
-	import scala.jdk.CollectionConverters._
+	import scala.concurrent.duration.*
+	import scala.jdk.CollectionConverters.*
 	given timeout: Scheduler = sys.scheduler
 	given scheduler: Timeout = Timeout(5.second)
 	
 
 	lazy val route: Route = (reqc: RequestContext) => {
 		val path = reqc.request.uri.path
-		import ldp.Container
-		given ec: ExecutionContext = reqc.executionContext
+		import reqc.{given}
 		reqc.log.info("routing req " + reqc.request.uri)
-		val (remaining, actor): (List[String], ActorRef[Container.Cmd]) = registry.getActorRef(path)
+		val (remaining, actor): (List[String], ActorRef[FSContainer.Cmd]) = registry.getActorRef(path)
 			.getOrElse((List[String](), rootRef))
 		println("remaining=" + remaining)
-		val ftr = actor.ask[HttpResponse](Container.RouteHttp(remaining, reqc.request, _))
-		ftr.map(RouteResult.Complete(_))
+		def cmdFn(ref: ActorRef[HttpResponse]): FSContainer.Cmd = remaining match {
+			case Nil =>  FSContainer.Do(reqc.request,ref)
+			case head::tail => FSContainer.Route(NonEmptyList(head,tail), reqc.request, ref)
+		}
+		actor.ask[HttpResponse](cmdFn).map(RouteResult.Complete(_))
 	}
 
 

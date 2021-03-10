@@ -4,7 +4,6 @@ import akka.actor.typed._
 import akka.actor.typed.scaladsl.Behaviors
 import akka.http.scaladsl.model.{HttpRequest, Uri}
 import cats.data.NonEmptyList
-import run.cosy.ldp.ContainerRegistry
 
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicReference
@@ -62,12 +61,12 @@ trait PathDB[T] {
  *
  * @param system not used at present
  */
-class ContainerRegistry(system: ActorSystem[_]) extends PathDB[ActorRef[Container.Cmd]] with Extension
+class ResourceRegistry(system: ActorSystem[_]) extends PathDB[ActorRef[FSContainer.Cmd]] with Extension
 
 
-object ContainerRegistry extends ExtensionId[ContainerRegistry] {
-	def createExtension(system: ActorSystem[_]): ContainerRegistry =
-		new ContainerRegistry(system)
+object ResourceRegistry extends ExtensionId[ResourceRegistry] {
+	def createExtension(system: ActorSystem[_]): ResourceRegistry =
+		new ResourceRegistry(system)
 }
 
 
@@ -76,7 +75,6 @@ object ContainerRegistry extends ExtensionId[ContainerRegistry] {
  * Only use in synchronised block */
 case class ATree[A](a: A, kids: HashMap[String, ATree[A]] = HashMap[String, ATree[A]]()) {
 	type Path = List[String]
-	type NePath = NonEmptyList[String]
 
 	final
 	def insert(newRef: A, at: Path): ATree[A] =
