@@ -37,7 +37,37 @@ object Attributes {
 			val att = Files.readAttributes(path, classOf[BasicFileAttributes], NOFOLLOW_LINKS)
 			Attributes(path,att)
 		}
-	
+
+	/**
+	 * Create a Symbolic Link
+	 * @param dirPath  the path of the directory in which the link will be placed
+	 * @param linkName the name of the symbolic link
+	 * @param linkTo the relative name of the file linked to
+	 * @return The full path to the symbolic link relative to the base where the JVM is running
+	 */
+	def createLink(dirPath: Path, linkName: String, linkTo: String): Try[SymLink] = Try {
+		import java.nio.file.Paths
+		import java.nio.file.attribute.FileTime
+		val path = dirPath.resolve(linkName)
+		val linkPath = Files.createSymbolicLink(path, Paths.get(linkTo))
+		val now = Instant.now()
+		val ftNow = FileTime.from(now)
+		//avoid checking the file system again, create the obvious answer
+		SymLink(linkPath,Paths.get(linkTo),
+			new BasicFileAttributes {
+				import java.nio.file.attribute.FileTime
+				override def lastModifiedTime(): FileTime =  ftNow
+				override def lastAccessTime(): FileTime = ftNow
+				override def creationTime(): FileTime = ftNow
+				override def isRegularFile: Boolean = false
+				override def isDirectory: Boolean = false
+				override def isSymbolicLink: Boolean = true
+				override def isOther: Boolean = false
+				override def size(): Long = 0
+				override def fileKey(): AnyRef = null
+			},now)
+	}
+
 	//todo: may want to remove this later. Just here to help me refactor code
 	sealed trait ActorFileAttr extends Attributes
 	

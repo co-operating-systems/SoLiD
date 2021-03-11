@@ -12,12 +12,19 @@ After downloading this repository you can start the server as follows:
 ```
 $ sbt
 > compile
-> run .
+> run test 
 ```
 
+This will read and write files to the `test` directory.
 Then on the command line you can try downloading a resource with
 
+```bash
+$ curl -i http://localhost:8080/hello
 ```
-$ curl -i http://localhost:8080/README.md
+
+or you can upload a file with 
+
+```bash
+curl --data-binary @README.md -H "Content-Type: text/markdown" -H "Slug: README.md" -X POST http://localhost:8080/
 ```
 

@@ -81,7 +81,7 @@ import scala.util.Random
  * */
 object BasicContainer {
 
-	import java.time.Instant
+	import java.time.{Clock, Instant}
 
 	/** A collection of "unwise" characters according to [[https://tools.ietf.org/html/rfc2396#section-2.4.3 RFC 2396]]. */
 	val UnwiseChars = """{}|\^[]`"""
@@ -92,23 +92,30 @@ object BasicContainer {
 	/** Generic delimiters according to [[https://tools.ietf.org/html/rfc3986#section-2.2 RFC 3986]] */
 	val GenDelims = """:/?#[]@"""
 	val SubDelims = """!$&'()*+,;="""
-	val ReactiveSolidDelims = "._"
+	val ReactiveSolidDelims = "_"
 	val Remove = (UnwiseChars + Delims + GenDelims + SubDelims + ReactiveSolidDelims).toSet
 
 	val MaxFileName = 100
 
 	def santiseSlug(slugTxt: String): String =
-		val santized: String = slugTxt.filterNot(c => Remove.contains(c) || c.isWhitespace)
+		val santized: String = slugTxt.takeWhile(_ != '.').filterNot(c => Remove.contains(c) || c.isWhitespace)
 		santized.substring(0, Math.min(MaxFileName, santized.size))
 
 	val timeFormat = DateTimeFormatter.ofPattern("yyyyMMdd-N").withZone(ZoneId.of("UTC"))
-	def createTimeStampFileName: String =  timeFormat.format(LocalDateTime.now())
+	def createTimeStampFileName(clock: Clock): String =  timeFormat.format(LocalDateTime.now(clock))
 
 	//todo: add Content-Encoding, Content-Language
-	def linkToName(linkName: String, cts: Seq[`Content-Type`]) =
-		linkName +"."+cts.flatMap(_.contentType.mediaType.fileExtensions).headOption.getOrElse("bin")
+	def linkToName(linkName: String, cts: ContentType) =
+		linkName +"."+cts.contentType.mediaType.fileExtensions.headOption.getOrElse("bin")
 
-
+	/** @return (linkName, linkTo) strings */
+	def createName(req: HttpRequest, clock: Clock = Clock.systemDefaultZone): (String, String) = {
+		val linkName = req.header[Slug]
+			.map(slug => santiseSlug(slug.text.toString))
+			.getOrElse(createTimeStampFileName(clock))
+		val linkTo = linkToName(linkName, req.entity.contentType)
+		(linkName, linkTo)
+	}
 
 	// log.info(s"created LDPC($ldpcUri,$root)")
 
@@ -247,11 +254,7 @@ class BasicContainer private(
 		else ??? //if PUT create dir else return error
 	}
 
-	def createLink(linkName: String, linkTo: String): Try[Path] = Try {
-		val path = dirPath.resolve(linkName)
-		Files.createSymbolicLink(path, dirPath.resolve(linkTo))
-	}
-	
+
 
 	// url for resource with `name` in this container
 	def urlFor(name: String): Uri = containerUrl.withPath(containerUrl.path / name)
@@ -276,7 +279,7 @@ class BasicContainer private(
 		import java.time.Instant
 
 		lazy val start: Behavior[Cmd] = {
-			Behaviors.receiveMessage[Cmd] { msg =>
+			Behaviors.receiveMessage[Cmd] { (msg: Cmd) =>
 				import BasicContainer.ChildTerminated
 				msg match
 					case act: Do => run(act)
@@ -320,8 +323,8 @@ class BasicContainer private(
 					case Success(att: ActorFileAttr) =>
 						val r: Ref = context.spawn(att,urlFor(name))
 						Some((r, new Dir(contains + (name -> r), counters)))
-					case Failure(e) => 
-						e match
+					case Failure(err) => 
+						err match
 						case e: UnsupportedOperationException =>
 							context.log.error(s"Cannot get BasicFileAttributes! JDK misconfigured on request <$path>", e)
 							None
@@ -338,18 +341,11 @@ class BasicContainer private(
 				
 		// state monad	fn. create symlink to new file (we don't have an actor for it yet)
 		def createSymLink(linkName: String, linkTo: String): Try[(RRef, Dir)] =
-			createLink(linkName,linkTo).flatMap { path => 
-				Attributes.forPath(path).flatMap{ attrs =>
-					attrs match
-						case att: Attributes.SymLink => Success{ 
-							val ref = context.spawn(att,urlFor(linkName))
-							(ref, new Dir(contains + (linkName -> ref)))
-						}
-						case other =>
-							context.log.warn(s"created symlink <$path> but on checking attributes did not fit",other)	
-							Failure(new Throwable("Problem creating resource"))	
-					}
+			Attributes.createLink(dirPath, linkName,linkTo).map{ att =>
+				val ref = context.spawn(att,urlFor(linkName))
+				(ref, new Dir(contains + (linkName -> ref)))
 			}
+			
 
 			
 		/** state monad fn	- return counter for given base name so that one can create the next name 
@@ -407,15 +403,13 @@ class BasicContainer private(
 					Behaviors.same
 				case POST =>  //create resource
 					//todo: create sub container for LDPC Post
-					val linkName = header[Slug]
-									.map(slug => santiseSlug(slug.text.toString))
-									.getOrElse(BasicContainer.createTimeStampFileName)
-					val linkTo = linkToName(linkName,headers[`Content-Type`])
+					import BasicContainer.createName
+					val (linkName: String, linkTo: String) = createName(msg.req)
 					val response: Try[(RRef, Dir)] = createSymLink(linkName,linkTo).recoverWith {
 						case e : FileAlreadyExistsException =>   // this is the pattern of a state monad!
 							val (nextId, newDir) = nextCounterFor(linkTo)
 							val nextLinkName = linkName+"_"+nextId
-							createSymLink(nextLinkName,linkToName(nextLinkName,headers[`Content-Type`]))
+							createSymLink(nextLinkName,linkToName(nextLinkName,entity.contentType))
 					}
 					response match {
 						case Success((ref, dir)) =>

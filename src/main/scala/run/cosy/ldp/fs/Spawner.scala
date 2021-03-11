@@ -13,6 +13,7 @@ import BasicContainer.{ChildTerminated, Cmd}
  **/
 class Spawner(val context: ActorContext[Cmd]) extends AnyVal {
 
+	import org.slf4j.Logger
 	import run.cosy.ldp.fs.Attributes.ActorFileAttr
 
 	def spawn(dir: DirAtt, url: Uri)(
@@ -33,11 +34,12 @@ class Spawner(val context: ActorContext[Cmd]) extends AnyVal {
 
 	def spawn(dir: ActorFileAttr, url: Uri)(
 		using reg: ResourceRegistry
-	): Ref = 
-	dir match 
+	): Ref =
+		import org.slf4j.Logger
+		dir match 
 		case d: DirAtt => spawn(d,url)
 		case s: SymLink => spawn(s,url)
 	
 	
-	def log = context.log
+	def log: Logger = context.log
 }
