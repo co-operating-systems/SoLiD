@@ -1,7 +1,7 @@
-package run.cosy.ldp
+package run.cosy.ldp.fs
 
-import akka.actor.typed.{ActorRef, Behavior, PostStop, PreRestart}
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
+import akka.actor.typed.{ActorRef, Behavior, PostStop, PreRestart}
 import akka.http.scaladsl.model
 import akka.http.scaladsl.model.StatusCodes.{InternalServerError, MovedPermanently, NotFound, NotImplemented, OK}
 import akka.http.scaladsl.model.headers.`Content-Type`
@@ -16,7 +16,6 @@ import akka.{Done, NotUsed}
 import cats.data.NonEmptyList
 import run.cosy.http.Headers.Slug
 import run.cosy.ldp
-import run.cosy.ldp.FSContainer.*
 
 import java.io.{BufferedReader, BufferedWriter, FileReader, FileWriter}
 import java.lang.UnsupportedOperationException
@@ -28,6 +27,11 @@ import java.util.{Locale, stream}
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success, Try, Using}
 //import run.cosy.http.Slug
+
+import akka.event.slf4j.Slf4jLogger
+import run.cosy.ldp.fs.BasicContainer
+import run.cosy.ldp.fs.BasicContainer.Cmd
+import run.cosy.ldp.ResourceRegistry
 
 import java.nio.file.{Files, Path}
 import scala.collection.immutable.HashMap
@@ -75,9 +79,8 @@ import scala.util.Random
  *  - PATCH is like PUT
  *   - QUERY is like GET
  * */
-object FSContainer {
+object BasicContainer {
 
-	import java.nio.file.attribute.BasicFileAttributes
 	import java.time.Instant
 
 	/** A collection of "unwise" characters according to [[https://tools.ietf.org/html/rfc2396#section-2.4.3 RFC 2396]]. */
@@ -116,10 +119,10 @@ object FSContainer {
 		using
 		reg: ResourceRegistry
 	): Behavior[Cmd] = Behaviors.setup[Cmd] { (context: ActorContext[Cmd]) =>
-		//val exists = Files.exists(root)    
+		//val exists = Files.exists(root)
 		reg.addActorRef(containerUrl.path, context.self)
 		context.log.info("started actor at " + containerUrl.path)
-		new FSContainer(containerUrl, dir, context).behavior
+		new BasicContainer(containerUrl, dir, new Spawner(context)).behavior
 	}
 
 	sealed trait Cmd
@@ -148,7 +151,7 @@ object FSContainer {
 		req: HttpRequest,
 		replyTo: ActorRef[HttpResponse]
 	)(using val mat: Materializer, val ec: ExecutionContext) extends ReqCmd
-	
+
 
 	// responses from child to parent
 	case class ChildTerminated(name: String) extends Cmd
@@ -205,25 +208,25 @@ object FSContainer {
  * @param containerUrl the URL of the container. (without the slash, so that it is east to write `ctnr / path`) 
  * @param dirPath      the path on the filesystem that corresponds to the container
  */
-class FSContainer private(
+class BasicContainer private(
 	containerUrl: Uri,
 	dirPath: Path,
-	context: ActorContext[Cmd]
+	context: Spawner
 )(
 	using
 	reg: ResourceRegistry
 ) {
 
-	import FSContainer.{Cmd, Do, ReqCmd, Route, linkToName, santiseSlug}
+	import BasicContainer.{Do, ReqCmd, Route, linkToName, santiseSlug}
 	import akka.http.scaladsl.model.HttpCharsets.`UTF-8`
 	import akka.http.scaladsl.model.MediaTypes.{`text/plain`, `text/x-java-source`}
 	import akka.http.scaladsl.model.headers.{Link, LinkParams, LinkValue, Location, `Content-Type`}
 	import akka.http.scaladsl.model.{ContentTypes, HttpCharsets, HttpEntity, HttpMethods}
-	import HttpMethods.{GET,POST}
-	import run.cosy.ldp.FSResource
-	import run.cosy.ldp.FSResource.CreateResource
-
-
+	import HttpMethods.{GET, POST}
+	import Resource.CreateResource
+	import Attributes.ActorFileAttr
+	import run.cosy.ldp.fs.{Ref,CRef,RRef}
+	
 	import java.nio.file.attribute.BasicFileAttributes
 	import java.time.Instant
 	//Cashed Contents of Directory 
@@ -248,27 +251,7 @@ class FSContainer private(
 		val path = dirPath.resolve(linkName)
 		Files.createSymbolicLink(path, dirPath.resolve(linkTo))
 	}
-
-	trait FileAttr(val name: String, att: BasicFileAttributes, collectedAt: Instant) {
-		type ActorType
-		//def withActor(ref: ActorRef[ActorType]): Ref
-	}
-	trait ActorFileAttr extends FileAttr {
-		/** as written: only call after checking it is not cached! 
-		 * todo: should one check? */
-		type RefType <: Ref
-		def spawn: RefType
-	}
 	
-	//Allows us to distinguish types of resources, without yet having created actors for them.
-	//later we may want to wrap these in info to tell when the last time we checked the FS was.
-	/**
-	 * @tparam name local name of the resource in the directory
-	 * @tparam att proof of existence. todo: should be wrapped in a time stamped object              
-	 */
-	trait Ref(val att: ActorFileAttr) {
-		def actor : ActorRef[att.ActorType]
-	}
 
 	// url for resource with `name` in this container
 	def urlFor(name: String): Uri = containerUrl.withPath(containerUrl.path / name)
@@ -291,9 +274,10 @@ class FSContainer private(
 
 		import java.nio.file.attribute.BasicFileAttributes
 		import java.time.Instant
-		
+
 		lazy val start: Behavior[Cmd] = {
 			Behaviors.receiveMessage[Cmd] { msg =>
+				import BasicContainer.ChildTerminated
 				msg match
 					case act: Do => run(act)
 					case routeMsg: Route => routeHttpReq(routeMsg)
@@ -308,69 +292,6 @@ class FSContainer private(
 					Behaviors.same
 			}
 		}
-
-
-		object FileAttr {
-
-			import java.time.Clock
-
-			case class DirAttributes private[FileAttr](
-				override val name: String, att: BasicFileAttributes, collectedAt: Instant
-			) extends ActorFileAttr with FileAttr(name,att,collectedAt) {
-				type ActorType = Cmd
-				type RefType = Ref.CRef
-				def spawn: RefType =
-					val ref: ActorRef[ActorType] =
-						context.spawn(
-							FSContainer(urlFor(name), dirPath.resolve(name)), name)
-					context.watchWith(ref, ChildTerminated(name))
-					Ref.CRef(this, ref)
-			}
-			case class FileAttributes private[FileAttr] (
-				override val name: String, att: BasicFileAttributes, collectedAt: Instant
-			) extends ActorFileAttr with FileAttr(name,att,collectedAt) {
-				type ActorType = FSResource.AcceptMsg
-				type RefType = Ref.RRef
-				
-				def spawn: RefType =
-					val ref: ActorRef[ActorType] = context.spawn(
-						FSResource(urlFor(name), dirPath.resolve(name), name), name)
-					context.watchWith(ref, ChildTerminated(name))
-					Ref.RRef(this,ref)
-			}
-			case class OtherAttributes private[FileAttr](
-				fileName: String, att: BasicFileAttributes, collectedAt: Instant
-			) extends FileAttr(fileName,att,collectedAt) {
-				type ActorType = Do
-			}
-
-			def apply(fileName: String, att: BasicFileAttributes, collectedAt: Instant = Instant.now()): FileAttr = {
-				if (att.isDirectory) DirAttributes(fileName,att,collectedAt)
-				else if (att.isSymbolicLink) FileAttributes(fileName,att, collectedAt)
-				else  OtherAttributes(fileName,att,collectedAt)
-			}
-			
-			def forPath(path: Path): Try[FileAttr] = 
-				import java.nio.file.attribute.BasicFileAttributes
-				import java.nio.file.LinkOption.NOFOLLOW_LINKS
-				Try {
-					val att = Files.readAttributes(path, classOf[BasicFileAttributes], NOFOLLOW_LINKS)
-					FileAttr(path.getFileName.toString,att)
-				}
-			
-		}
-		
-		object Ref {
-			import FileAttr.{DirAttributes, FileAttributes}
-
-			case class CRef (
-				override val att: DirAttributes, actor: ActorRef[Cmd]
-			) extends Ref(att)
-			
-			case class RRef (
-				override val att: FileAttributes, actor: ActorRef[FSResource.AcceptMsg]
-			) extends Ref(att)
-		}
 		
 		/**
 		 * Get Ref for name by checking in cache, and if not on the FS. It does not create an actor for the Ref.
@@ -384,45 +305,44 @@ class FSContainer private(
 		def getRef(name: String): Option[(Ref, Dir)] =
 			println("contains = "+contains)
 			contains.get(name).map { (v : Ref|ActorFileAttr)  =>
+				import Attributes.{DirAtt, SymLink}
 				v match 
 				case ref: Ref => (ref, Dir.this)
-				case fa: ActorFileAttr  =>	
-					val r: Ref = fa.spawn
-					(r, new Dir(contains + (name -> r), counters))
+				case fa: ActorFileAttr  =>
+					val r = context.spawn(fa,urlFor(name))
+					(r, new Dir(contains + (name -> r), counters))	
 			}.orElse {
-				import java.nio.file.attribute.BasicFileAttributes
-				import java.nio.file.LinkOption.NOFOLLOW_LINKS
 				import java.io.IOException
+				import java.nio.file.LinkOption.NOFOLLOW_LINKS
+				import java.nio.file.attribute.BasicFileAttributes
 				val path = dirPath.resolve(name)  //todo: also can throw exception
-				try { // we only check for directories and symlinks
-					val att = Files.readAttributes(path, classOf[BasicFileAttributes], NOFOLLOW_LINKS)
-					FileAttr(name,att) match 
-						case att: ActorFileAttr => 
-							val r: att.RefType = att.spawn
-							Some((r, new Dir(contains + (name -> r), counters)))
-						case _ => None
-				} catch {
-					case e: UnsupportedOperationException =>
-						context.log.error(s"Cannot get BasicFileAttributes! JDK misconfigured on request <$path>", e)
-						None
-					case e: IOException =>
-						context.log.info(s"IOException trying to get <$path>", e)	
-						None
-					case e: SecurityException =>
-						context.log.warn(s"Security Exception on searching for attributes on <$path>.", e)
-						None
-				}
+				Attributes.forPath(path) match
+					case Success(att: ActorFileAttr) =>
+						val r: Ref = context.spawn(att,urlFor(name))
+						Some((r, new Dir(contains + (name -> r), counters)))
+					case Failure(e) => 
+						e match
+						case e: UnsupportedOperationException =>
+							context.log.error(s"Cannot get BasicFileAttributes! JDK misconfigured on request <$path>", e)
+							None
+						case e: IOException =>
+							context.log.info(s"IOException trying to get <$path>", e)
+							None
+						case e: SecurityException =>
+							context.log.warn(s"Security Exception on searching for attributes on <$path>.", e)
+							None
+					case _ => None
 			}
 		end getRef
 
 				
 		// state monad	fn. create symlink to new file (we don't have an actor for it yet)
-		def createSymLink(linkName: String, linkTo: String): Try[(Ref.RRef, Dir)] = 
+		def createSymLink(linkName: String, linkTo: String): Try[(RRef, Dir)] =
 			createLink(linkName,linkTo).flatMap { path => 
-				FileAttr.forPath(path).flatMap{ attrs =>
-					attrs match 
-						case att: FileAttr.FileAttributes => Success{ 
-							val ref: att.RefType = att.spawn
+				Attributes.forPath(path).flatMap{ attrs =>
+					attrs match
+						case att: Attributes.SymLink => Success{ 
+							val ref = context.spawn(att,urlFor(linkName))
 							(ref, new Dir(contains + (linkName -> ref)))
 						}
 						case other =>
@@ -430,7 +350,7 @@ class FSContainer private(
 							Failure(new Throwable("Problem creating resource"))	
 					}
 			}
-			
+
 			
 		/** state monad fn	- return counter for given base name so that one can create the next name 
 		 * e.g. for base name `cat`  and number 3 the next created file could be `cat_3` */ 
@@ -489,9 +409,9 @@ class FSContainer private(
 					//todo: create sub container for LDPC Post
 					val linkName = header[Slug]
 									.map(slug => santiseSlug(slug.text.toString))
-									.getOrElse(FSContainer.createTimeStampFileName)
+									.getOrElse(BasicContainer.createTimeStampFileName)
 					val linkTo = linkToName(linkName,headers[`Content-Type`])
-					val response: Try[(Ref.RRef, Dir)] = createSymLink(linkName,linkTo).recoverWith {
+					val response: Try[(RRef, Dir)] = createSymLink(linkName,linkTo).recoverWith {
 						case e : FileAlreadyExistsException =>   // this is the pattern of a state monad!
 							val (nextId, newDir) = nextCounterFor(linkTo)
 							val nextLinkName = linkName+"_"+nextId
@@ -532,10 +452,10 @@ class FSContainer private(
 		//  this indicates that the path name must be set after checking the attributes!
 		def forwardToContainer(name: String, msg: ReqCmd): Behavior[Cmd] = 
 			getRef(name) match 
-				case Some((ref,dir)) => 
+				case Some((ref,dir)) =>
 					ref match
-					case Ref.CRef(att, actor) => actor ! msg
-					case Ref.RRef(att, actor) => // there is no container, so redirect to resource
+					case CRef(att, actor) => actor ! msg
+					case RRef(att, actor) => // there is no container, so redirect to resource
 						msg match
 							case Do(req, replyTo) =>  //we're at the path end, so we can redirect
 								val uri = msg.req.uri
@@ -544,7 +464,7 @@ class FSContainer private(
 							case Route(path, req, replyTo) => // the path passes through a file, so it must end here
 								replyTo ! HttpResponse(NotFound, Seq(), s"Resource with URI ${req.uri} does not exist")
 					dir.start
-				case None => { msg.replyTo ! HttpResponse(NotFound, Seq(), 
+				case None => { msg.replyTo ! HttpResponse(NotFound, Seq(),
 					HttpEntity(`text/plain`.withCharset(`UTF-8`),
 							s"""Resource with URI ${msg.req.uri} does not exist."""))
 					Behaviors.same }
@@ -563,7 +483,6 @@ class FSContainer private(
 			val obj = getRef(dotLessName)
 			obj match
 				case Some((ref,dir)) => {
-					import Ref._
 					ref match {
 						case CRef(att, actor) => msg.replyTo ! {
 							if (dotLessName == name)
@@ -572,7 +491,7 @@ class FSContainer private(
 							else HttpResponse(NotFound)
 						}
 						case RRef(att, actor) => actor ! msg
-						case _ => context.log.warn("did not match anthing: received "+ref)
+						case null => context.log.warn(s"did not match anthing in $dirPath: received ref ="+ref)
 					}
 					dir.start
 				}

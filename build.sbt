@@ -22,6 +22,7 @@ lazy val root = project
 		libraryDependencies ++= Seq(
 			"com.typesafe.akka" %% "akka-actor-typed" % AkkaVersion,
 			"com.typesafe.akka" %% "akka-stream" % AkkaVersion,
+			"com.typesafe.akka" %% "akka-actor-testkit-typed" % AkkaVersion % Test,
 			"com.typesafe.akka" %% "akka-http" % AkkaHttpVersion,
 			"com.typesafe.akka" %% "akka-slf4j" % AkkaVersion,
 			// https://doc.akka.io/docs/alpakka/snapshot/
@@ -30,13 +31,15 @@ lazy val root = project
 			"ch.qos.logback" % "logback-classic" % "1.2.3",
 			"org.typelevel" %% "cats-core" % "2.4.2",
 			"org.typelevel" %% "cats-free" % "2.4.2",
+
 			//"com.novocode" % "junit-interface" % "0.11" % "test"
-			//"org.scalatest"     %% "scalatest"        % "3.2.2" % "test",
 		).map(_.withDottyCompat(scalaVersion.value)),
 
 		libraryDependencies ++= Seq(
 			//https://mvnrepository.com/artifact/org.typelevel/cats-core
-			"org.scalameta" %% "munit" % "0.7.22" % Test
+			"org.scalameta" %% "munit" % "0.7.22" % Test,
+			"org.scalactic" %% "scalactic" % "3.2.5",
+			"org.scalatest" %% "scalatest" % "3.2.5" % Test
 		),
 
 		// java libs

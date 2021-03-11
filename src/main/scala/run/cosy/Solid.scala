@@ -1,9 +1,9 @@
 package run.cosy
 
 import akka.Done
-import akka.actor.{CoordinatedShutdown}
+import akka.actor.CoordinatedShutdown
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors, LoggerOps}
-import akka.actor.typed.{Behavior, ActorRef, ActorSystem, Scheduler, PostStop}
+import akka.actor.typed.{ActorRef, ActorSystem, Behavior, PostStop, Scheduler}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.Http.ServerBinding
 import akka.http.scaladsl.model.Uri.Path.{Empty, Segment, Slash}
@@ -15,7 +15,8 @@ import akka.http.scaladsl.util.FastFuture
 import akka.util.Timeout
 import cats.data.NonEmptyList
 import com.typesafe.config.{Config, ConfigFactory}
-import run.cosy.ldp.{FSContainer, ResourceRegistry}
+import run.cosy.ldp.ResourceRegistry
+import run.cosy.ldp.fs.BasicContainer
 
 import java.io.{File, FileInputStream}
 import java.nio.file.{Files, Path}
@@ -35,10 +36,11 @@ object Solid {
 
 	def apply(uri: Uri, fpath: Path): Behavior[Run] =
 		Behaviors.setup { (ctx: ActorContext[Run]) =>
+			import run.cosy.ldp.fs.BasicContainer
 			given system: ActorSystem[Nothing] = ctx.system
 			given reg : ResourceRegistry = ResourceRegistry(ctx.system)
 			val withoutSlash = uri.withPath(uri.path.reverse.dropChars(1).reverse)
-			val rootRef: ActorRef[FSContainer.Cmd] = ctx.spawn(FSContainer(withoutSlash, fpath), "solid")
+			val rootRef: ActorRef[BasicContainer.Cmd] = ctx.spawn(BasicContainer(withoutSlash, fpath), "solid")
 			val registry = ResourceRegistry(system)
 			val solid = new Solid(fpath, uri, registry, rootRef)
 			given timeout: Scheduler = system.scheduler
@@ -133,7 +135,7 @@ object Solid {
 class Solid(path: Path,
             baseUri: Uri,
             registry: ResourceRegistry,
-            rootRef: ActorRef[FSContainer.Cmd])(using sys: ActorSystem[_]) {
+            rootRef: ActorRef[BasicContainer.Cmd])(using sys: ActorSystem[_]) {
 
 	import akka.actor.typed.scaladsl.AskPattern.{Askable, schedulerFromActorSystem}
 	import akka.pattern.ask
@@ -148,12 +150,12 @@ class Solid(path: Path,
 		val path = reqc.request.uri.path
 		import reqc.{given}
 		reqc.log.info("routing req " + reqc.request.uri)
-		val (remaining, actor): (List[String], ActorRef[FSContainer.Cmd]) = registry.getActorRef(path)
+		val (remaining, actor): (List[String], ActorRef[BasicContainer.Cmd]) = registry.getActorRef(path)
 			.getOrElse((List[String](), rootRef))
 		println("remaining=" + remaining)
-		def cmdFn(ref: ActorRef[HttpResponse]): FSContainer.Cmd = remaining match {
-			case Nil =>  FSContainer.Do(reqc.request,ref)
-			case head::tail => FSContainer.Route(NonEmptyList(head,tail), reqc.request, ref)
+		def cmdFn(ref: ActorRef[HttpResponse]): BasicContainer.Cmd = remaining match {
+			case Nil =>  BasicContainer.Do(reqc.request,ref)
+			case head::tail => BasicContainer.Route(NonEmptyList(head,tail), reqc.request, ref)
 		}
 		actor.ask[HttpResponse](cmdFn).map(RouteResult.Complete(_))
 	}

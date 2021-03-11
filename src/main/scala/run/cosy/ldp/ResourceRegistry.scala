@@ -4,6 +4,7 @@ import akka.actor.typed._
 import akka.actor.typed.scaladsl.Behaviors
 import akka.http.scaladsl.model.{HttpRequest, Uri}
 import cats.data.NonEmptyList
+import run.cosy.ldp.fs.BasicContainer
 
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicReference
@@ -61,7 +62,7 @@ trait PathDB[T] {
  *
  * @param system not used at present
  */
-class ResourceRegistry(system: ActorSystem[_]) extends PathDB[ActorRef[FSContainer.Cmd]] with Extension
+class ResourceRegistry(system: ActorSystem[_]) extends PathDB[ActorRef[BasicContainer.Cmd]] with Extension
 
 
 object ResourceRegistry extends ExtensionId[ResourceRegistry] {

@@ -1,4 +1,4 @@
-package run.cosy.ldp
+package run.cosy.ldp.fs
 
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, Behavior, scaladsl}
@@ -8,9 +8,9 @@ import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.headers.{Accept, Location, `Content-Type`}
 import akka.stream.IOResult
 import akka.stream.scaladsl.FileIO
-import run.cosy.ldp.FSContainer.{Cmd, Do, Route}
-import run.cosy.ldp.FSResource.connegNamesFor
 import run.cosy.ldp.ResourceRegistry
+import run.cosy.ldp.fs.BasicContainer.{Cmd, Do, Route}
+import run.cosy.ldp.fs.Resource.connegNamesFor
 
 import java.nio.file.{Files, Path => FPath}
 import java.security.Principal
@@ -23,27 +23,27 @@ import scala.util.{Failure, Success}
  * LDPR Actor extended with Access Control
  * In order to avoid having to list the whole directory to find out if a file exists,
  * we create a resource actor that can make a few cheaper spot checks for files given
- * the request, and so build up a little DB. 
+ * the request, and so build up a little DB.
  *
- * A Resource can react to 
+ * A Resource can react to
  *  - GET and do content negotiation
  *  - PUT for changes
- *  - PATCH and QUERY potentially 
+ *  - PATCH and QUERY potentially
  *
  * Because the Directory does not necessarily look if any of the resources exist, the actor
  * should close down soon after finding that there is nothing there.
  *
  * An LDPR actor should garbage collect after a time, to reduce memory useage
  */
-object FSResource {
+object Resource {
 
+	import Resource.CreateResource
 	import HttpMethods._
 	import StatusCodes._
 	import akka.stream.Materializer
 
 	import java.nio.file.Path
 	import scala.concurrent.ExecutionContext
-	import run.cosy.ldp.FSResource.CreateResource
 
 	//log.info(s"created LDPR($ldprUri,$path)")
 
@@ -51,7 +51,7 @@ object FSResource {
 
 	/** send POST to child actor so that it can place the content body
 	 * into the file `name`
-	 * (arguably one may want to only send the RequestBody, instead of the full Do) 
+	 * (arguably one may want to only send the RequestBody, instead of the full Do)
 	 **/
 	case class CreateResource(
 		linkTo: Path, cmd: Do
@@ -80,24 +80,23 @@ object FSResource {
 	def apply(rUri: Uri, linkName: FPath, name: String): Behavior[AcceptMsg] =
 		Behaviors.setup[AcceptMsg] { (context: ActorContext[AcceptMsg]) =>
 			val linkTo = Files.readSymbolicLink(linkName)
-			//val exists = Files.exists(root)    
+			//val exists = Files.exists(root)
 //			val registry = ResourceRegistry(context.system)
 //			registry.addActorRef(rUri.path, context.self)
 //			context.log.info("started LDPR actor at " + rUri.path)
-			new FSResource(rUri, linkName, context).behavior
+			new Resource(rUri, linkName, context).behavior
 		}
 
-	/** todo: language versions, etc... 
+	/** todo: language versions, etc...
 	 * */
 	def connegNamesFor(name: String, ct: `Content-Type`): List[String] =
 		ct.contentType.mediaType.fileExtensions.map(name + "." + _)
 }
 
-import run.cosy.ldp.FSResource.AcceptMsg
+import run.cosy.ldp.fs.Resource.AcceptMsg
 
-class FSResource(uri: Uri, linkName: FPath, context: ActorContext[AcceptMsg]) {
-	import FSResource.mediaType
-	import FSResource.CreateResource
+class Resource(uri: Uri, linkName: FPath, context: ActorContext[AcceptMsg]) {
+	import Resource.{CreateResource, mediaType}
 	def behavior = FileData().start
 
 	class FileData(variants: Set[FPath] = Set(), linkTo: Option[FPath] = None) {
@@ -106,7 +105,7 @@ class FSResource(uri: Uri, linkName: FPath, context: ActorContext[AcceptMsg]) {
 			linkTo match
 			case Some(link) => (link, FileData.this)
 			case None =>
-				val to: FPath = Files.readSymbolicLink(linkName)	
+				val to: FPath = Files.readSymbolicLink(linkName)
 				(to, new FileData(variants,Some(to)))
 
 		def start: Behaviors.Receive[AcceptMsg] =
@@ -156,7 +155,7 @@ class FSResource(uri: Uri, linkName: FPath, context: ActorContext[AcceptMsg]) {
 						FileIO.fromPath(linkName)
 					)
 				)
-			} else 
+			} else
 				replyTo ! HttpResponse(
 					StatusCodes.UnsupportedMediaType, Seq(),
 					HttpEntity(`text/html`.withCharset(HttpCharsets.`UTF-8`),
