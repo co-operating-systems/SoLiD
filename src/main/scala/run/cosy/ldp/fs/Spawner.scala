@@ -26,7 +26,7 @@ class Spawner(val context: ActorContext[Cmd]) extends AnyVal {
 
 	def spawn(link: SymLink, url: Uri): RRef = {
 		val name = link.to.getFileName.toString
-		val ref = context.spawn(Resource(url, link.to, name), name)
+		val ref = context.spawn(Resource(url, link.path, link.to, name), name)
 		context.watchWith(ref, ChildTerminated(name))
 		RRef(link, ref)
 	}

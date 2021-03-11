@@ -77,9 +77,8 @@ object Resource {
 		else ""
 	}
 
-	def apply(rUri: Uri, linkName: FPath, name: String): Behavior[AcceptMsg] =
+	def apply(rUri: Uri, linkName: FPath, linkTo: FPath, name: String): Behavior[AcceptMsg] =
 		Behaviors.setup[AcceptMsg] { (context: ActorContext[AcceptMsg]) =>
-			val linkTo = Files.readSymbolicLink(linkName)
 			//val exists = Files.exists(root)
 //			val registry = ResourceRegistry(context.system)
 //			registry.addActorRef(rUri.path, context.self)
