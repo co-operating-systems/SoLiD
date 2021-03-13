@@ -16,6 +16,8 @@ object Encoding {
 	opaque type UnicodeString = String
 	opaque type UrlEncoded = String
 	
+	implicit def toUnicode(str: String): UnicodeString = str
+	
 	extension (string: String)
 		def asClean : UnicodeString = string
 		def asEncoded : UrlEncoded = string

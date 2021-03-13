@@ -39,6 +39,8 @@ class TestContainerFn extends munit.FunSuite {
 		testSlug(null, mt.`video/mp4`.toContentType,"19700101-0","19700101-0.mp4")
 		testSlug(null, null,"19700101-0","19700101-0.a")
 		testSlug(null, mt.`application/octet-stream`.toContentType,"19700101-0","19700101-0.a")
+
+		testSlug("Readme_2",ContentTypes.`text/plain(UTF-8)`,"Readme2","Readme2.conf")
 	}
 
 }

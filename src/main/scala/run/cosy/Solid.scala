@@ -42,7 +42,7 @@ object Solid {
 			val withoutSlash = uri.withPath(uri.path.reverse.dropChars(1).reverse)
 			val rootRef: ActorRef[BasicContainer.Cmd] = ctx.spawn(BasicContainer(withoutSlash, fpath), "solid")
 			val registry = ResourceRegistry(system)
-			val solid = new Solid(fpath, uri, registry, rootRef)
+			val solid = new Solid(uri, fpath, registry, rootRef)
 			given timeout: Scheduler = system.scheduler
 			given ec: ExecutionContext = ctx.executionContext
 
@@ -132,10 +132,12 @@ object Solid {
  * @param path    to the root directory of the file system to be served
  * @param baseUri of the container, eg: https://alice.example/solid/
  */
-class Solid(path: Path,
-            baseUri: Uri,
-            registry: ResourceRegistry,
-            rootRef: ActorRef[BasicContainer.Cmd])(using sys: ActorSystem[_]) {
+class Solid(
+	baseUri: Uri, 
+	path: Path, 
+	registry: ResourceRegistry, 
+	rootRef: ActorRef[BasicContainer.Cmd]
+)(using sys: ActorSystem[_]) {
 
 	import akka.actor.typed.scaladsl.AskPattern.{Askable, schedulerFromActorSystem}
 	import akka.pattern.ask

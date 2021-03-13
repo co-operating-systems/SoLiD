@@ -290,7 +290,7 @@ class BasicContainer private(
 			}.receiveSignal {
 				case (_, signal) if signal == PreRestart || signal == PostStop =>
 					counters.foreach { (name, int) =>
-						saveSiblingsCountFor(dirPath.resolve(name), int)
+						saveSiblingsCountFor(name, int)
 					}
 					Behaviors.same
 			}
@@ -306,7 +306,6 @@ class BasicContainer private(
 		 * @return the Ref and the new Dir state, or None of there is no Reference at that location.
 		 * */
 		def getRef(name: String): Option[(Ref, Dir)] =
-			println("contains = "+contains)
 			contains.get(name).map { (v : Ref|ActorFileAttr)  =>
 				import Attributes.{DirAtt, SymLink}
 				v match 
@@ -343,7 +342,7 @@ class BasicContainer private(
 		def createSymLink(linkName: String, linkTo: String): Try[(RRef, Dir)] =
 			Attributes.createLink(dirPath, linkName,linkTo).map{ att =>
 				val ref = context.spawn(att,urlFor(linkName))
-				(ref, new Dir(contains + (linkName -> ref)))
+				(ref, new Dir(contains + (linkName -> ref),counters))
 			}
 			
 
@@ -358,22 +357,24 @@ class BasicContainer private(
 		
 		/** You need to update the counter if you use it. 
 		 *  This suggests one should have monadic interface on the config data */
-		def findSiblingCount(countFileRoot: String): Int = 
+		def findSiblingCount(countFileRoot: String): Int = { 
 			counters.get(countFileRoot).getOrElse {
 				val cf = countFile(countFileRoot)
 				Using(new BufferedReader(new FileReader(cf))) { (reader: BufferedReader) =>
 					reader.readLine().toInt
-				}.recover{
+				}.recover {
+					case e : java.io.FileNotFoundException => cf.createNewFile(); 1
 					case e : java.io.IOException => context.log.warn(s"Can't read count file <$cf>", e); 1
-					case e : java.lang.NumberFormatException => context.log.warn(s"error parsing counter in <$cf>",e); 1	
+					case e : java.lang.NumberFormatException => context.log.warn(s"error parsing counter in <$cf>"); 1
 				}.getOrElse(0)
 			}
+		}
 
 		//todo: save such info to disk on shutdown
 		def writeSiblingCount(countFileRoot: String, count: Int): Counter = counters + (countFileRoot -> (count+1))
 		
-		def saveSiblingsCountFor(countFile: Path, count: Int): Unit = 
-			Using(new BufferedWriter(new FileWriter(countFile.toFile))) { (writer: BufferedWriter) =>
+		def saveSiblingsCountFor(name: String, count: Int): Unit = 
+			Using(new BufferedWriter(new FileWriter(countFile(name)))) { (writer: BufferedWriter) =>
 				writer.write(count.toString)
 			} recover {
 				case e => context.log.warn(s"Can't save counter value $count for <$countFile>", e)
@@ -385,7 +386,6 @@ class BasicContainer private(
 			import akka.stream.alpakka.file.scaladsl.Directory
 			import msg.{ec, mat, req}
 			import req._
-			System.out.println(s"${uri.path} == ${containerUrl.path}")
 			if (!uri.path.endsWithSlash)
 				//this should have been dealt with by parent container, which should have tried conneg.
 				val ldpcUri = uri.withPath(uri.path / "")
@@ -407,13 +407,13 @@ class BasicContainer private(
 					val (linkName: String, linkTo: String) = createName(msg.req)
 					val response: Try[(RRef, Dir)] = createSymLink(linkName,linkTo).recoverWith {
 						case e : FileAlreadyExistsException =>   // this is the pattern of a state monad!
-							val (nextId, newDir) = nextCounterFor(linkTo)
+							val (nextId, newDir) = nextCounterFor(linkName)
 							val nextLinkName = linkName+"_"+nextId
-							createSymLink(nextLinkName,linkToName(nextLinkName,entity.contentType))
+							newDir.createSymLink(nextLinkName,linkToName(nextLinkName,entity.contentType))
 					}
 					response match {
 						case Success((ref, dir)) =>
-							ref.actor ! CreateResource(dirPath.resolve(linkTo),msg)
+							ref.actor ! CreateResource(dirPath.resolve(ref.att.to),msg)
 							dir.start
 						case Failure(e) => 
 							HttpResponse(InternalServerError, Seq(),

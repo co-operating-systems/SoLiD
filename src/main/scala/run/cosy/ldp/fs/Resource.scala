@@ -97,6 +97,7 @@ import run.cosy.ldp.fs.Resource.AcceptMsg
 class Resource(uri: Uri, linkName: FPath, context: ActorContext[AcceptMsg]) {
 	import Resource.{CreateResource, mediaType}
 	def behavior = FileData().start
+	context.log.info(s"starting Resource for <$uri> on $linkName")
 
 	class FileData(variants: Set[FPath] = Set(), linkTo: Option[FPath] = None) {
 
@@ -112,7 +113,9 @@ class Resource(uri: Uri, linkName: FPath, context: ActorContext[AcceptMsg]) {
 				import akka.http.scaladsl.model.HttpMethods.{GET, POST}
 				msg match
 					case cr @ CreateResource(linkToPath, Do(req, replyTo)) =>
-						context.log.info(s"received POST request with headers ${req.headers} and CT=${req.entity.contentType}")
+						context.log.info(
+							s"""received POST request with headers ${req.headers} and CT=${req.entity.contentType} 
+								|Saving to: $linkToPath""".stripMargin)
 						import cr.given
 						val f: Future[IOResult] = req.entity.dataBytes.runWith(FileIO.toPath(linkToPath))
 						f.andThen ({
@@ -122,6 +125,7 @@ class Resource(uri: Uri, linkName: FPath, context: ActorContext[AcceptMsg]) {
 								HttpEntity(`text/plain`.withCharset(HttpCharsets.`UTF-8`), s"uploaded $count bytes")
 								)
 							case Failure(e) =>
+								context.log.warn(s"Unable to prcess request $cr. Deleting $linkToPath")
 								// actually one may want to allow the client to continue from where it left off
 								Files.deleteIfExists(linkToPath)
 								replyTo ! HttpResponse(
