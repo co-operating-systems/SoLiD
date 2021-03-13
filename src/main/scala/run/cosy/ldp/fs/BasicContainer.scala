@@ -110,8 +110,8 @@ object BasicContainer {
 
 	/** @return (linkName, linkTo) strings */
 	def createName(req: HttpRequest, clock: Clock = Clock.systemDefaultZone): (String, String) = {
-		val linkName = req.header[Slug]
-			.map(slug => santiseSlug(slug.text.toString))
+		val linkName = req.headers.collectFirst{case Slug(name) => name}
+			.map(slug => santiseSlug(slug.toString))
 			.getOrElse(createTimeStampFileName(clock))
 		val linkTo = linkToName(linkName, req.entity.contentType)
 		(linkName, linkTo)

@@ -112,7 +112,7 @@ class Resource(uri: Uri, linkName: FPath, context: ActorContext[AcceptMsg]) {
 				import akka.http.scaladsl.model.HttpMethods.{GET, POST}
 				msg match
 					case cr @ CreateResource(linkToPath, Do(req, replyTo)) =>
-						context.log.info(s"received POST request with headers ${req.headers}")
+						context.log.info(s"received POST request with headers ${req.headers} and CT=${req.entity.contentType}")
 						import cr.given
 						val f: Future[IOResult] = req.entity.dataBytes.runWith(FileIO.toPath(linkToPath))
 						f.andThen ({

@@ -22,11 +22,13 @@ lazy val root = project
 		libraryDependencies ++= Seq(
 			"com.typesafe.akka" %% "akka-actor-typed" % AkkaVersion,
 			"com.typesafe.akka" %% "akka-stream" % AkkaVersion,
-			"com.typesafe.akka" %% "akka-actor-testkit-typed" % AkkaVersion % Test,
 			"com.typesafe.akka" %% "akka-http" % AkkaHttpVersion,
 			"com.typesafe.akka" %% "akka-slf4j" % AkkaVersion,
+			"com.typesafe.akka" %% "akka-actor-testkit-typed" % AkkaVersion % Test,
+			"com.typesafe.akka" %% "akka-stream-testkit" % AkkaVersion % Test,
+			"com.typesafe.akka" %% "akka-http-testkit" % AkkaHttpVersion % Test,
 			// https://doc.akka.io/docs/alpakka/snapshot/
-			"com.lightbend.akka" %% "akka-stream-alpakka-file" % "2.0.2+85-7d4f34b3", //"2.0.2",
+			"com.lightbend.akka" %% "akka-stream-alpakka-file" % "2.0.2",
 			//http://logback.qos.ch/download.html
 			"ch.qos.logback" % "logback-classic" % "1.2.3",
 			"org.typelevel" %% "cats-core" % "2.4.2",
