@@ -27,25 +27,18 @@ import cats.data.NonEmptyList
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
+import akka.http.scaladsl.model.Uri
+import run.cosy.ldp.testUtils.TmpDir
+import java.nio.file
+
 
 class TestContainerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers {
-	import akka.http.scaladsl.model.Uri
 
-	import java.nio.file
-	import java.nio.file.{Files, Path}
-
-	def tmpDir(testCode: Path => Any): Unit = 
-		import java.nio.file.Path
-		val dir: Path = Files.createTempDirectory("cosyTest")
+	def tmpDir(testCode: file.Path => Any): Unit = 
+		val dir: file.Path = TmpDir.createDir("solidTest")
 		try {
 			testCode(dir) // "loan" the fixture to the test
-		} finally
-			// Always gets called, even if test failed.
-			import java.nio.file.{Path,FileVisitOption, FileVisitor}
-			import java.util.Comparator
-			import scala.jdk.StreamConverters.{given,*}
-			val files: LazyList[Path] = Files.walk(dir).sorted(Comparator.reverseOrder()).toScala(LazyList)
-			files.map(_.toFile).foreach(_.delete)
+		} finally TmpDir.deleteDir(dir)
 	end tmpDir
 
 	val testKit = ActorTestKit()

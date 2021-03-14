@@ -3,19 +3,13 @@ package run.cosy.ldp.fs
 
 class TestAttributesFn extends munit.FunSuite {
 	import java.nio.file.{Files, Path}
+	import run.cosy.ldp.testUtils.TmpDir
 
 	val tmpDir = FunFixture[Path](
 		setup = { test =>
-			Files.createTempDirectory("cosyTest")
+			TmpDir.createDir("cosyTest")
 		},
-		teardown = { dir =>
-			// Always gets called, even if test failed.
-			import java.nio.file.{Path,FileVisitOption, FileVisitor}
-			import java.util.Comparator
-			import scala.jdk.StreamConverters.{given,*}
-			val files: LazyList[Path] = Files.walk(dir).sorted(Comparator.reverseOrder()).toScala(LazyList)
-			files.map(_.toFile).foreach(_.delete)
-		}
+		teardown = { dir => TmpDir.deleteDir(dir) }
 	)
 	
 	tmpDir.test("create SymLink") { (dirPath: Path) =>
