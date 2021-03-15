@@ -48,9 +48,9 @@ object Resource {
 	//log.info(s"created LDPR($ldprUri,$path)")
 
 	type AcceptMsg = Do | CreateResource
-
+	
 	/** send POST to child actor so that it can place the content body
-	 * into the file `name`
+	 * into the file `linkTo`
 	 * (arguably one may want to only send the RequestBody, instead of the full Do)
 	 **/
 	case class CreateResource(

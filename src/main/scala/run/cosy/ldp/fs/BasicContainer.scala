@@ -4,7 +4,7 @@ import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, Behavior, PostStop, PreRestart}
 import akka.http.scaladsl.model
 import akka.http.scaladsl.model.StatusCodes.{InternalServerError, MovedPermanently, NotFound, NotImplemented, OK}
-import akka.http.scaladsl.model.headers.`Content-Type`
+import akka.http.scaladsl.model.headers.{Link, LinkParam, LinkValue, `Content-Type`}
 import akka.http.scaladsl.model.{HttpRequest, HttpResponse, Uri}
 import akka.http.scaladsl.server.ContentNegotiator.Alternative
 import akka.http.scaladsl.server.ContentNegotiator.Alternative.ContentType
@@ -81,6 +81,9 @@ import scala.util.Random
  * */
 object BasicContainer {
 
+	import akka.http.scaladsl.model.HttpHeader
+	import akka.http.scaladsl.model.HttpHeader.ParsingResult.Ok
+
 	import java.time.{Clock, Instant}
 
 	/** A collection of "unwise" characters according to [[https://tools.ietf.org/html/rfc2396#section-2.4.3 RFC 2396]]. */
@@ -96,26 +99,48 @@ object BasicContainer {
 	val Remove = (UnwiseChars + Delims + GenDelims + SubDelims + ReactiveSolidDelims).toSet
 
 	val MaxFileName = 100
+	given clock: Clock = Clock.systemDefaultZone
 
 	def santiseSlug(slugTxt: String): String =
 		val santized: String = slugTxt.takeWhile(_ != '.').filterNot(c => Remove.contains(c) || c.isWhitespace)
 		santized.substring(0, Math.min(MaxFileName, santized.size))
 
 	val timeFormat = DateTimeFormatter.ofPattern("yyyyMMdd-N").withZone(ZoneId.of("UTC"))
-	def createTimeStampFileName(clock: Clock): String =  timeFormat.format(LocalDateTime.now(clock))
+	def createTimeStampFileName(using clock: Clock): String =  timeFormat.format(LocalDateTime.now(clock))
 
 	//todo: add Content-Encoding, Content-Language
 	def linkToName(linkName: String, cts: ContentType) =
 		linkName +"."+cts.contentType.mediaType.fileExtensions.headOption.getOrElse("bin")
 
 	/** @return (linkName, linkTo) strings */
-	def createName(req: HttpRequest, clock: Clock = Clock.systemDefaultZone): (String, String) = {
-		val linkName = req.headers.collectFirst{case Slug(name) => name}
-			.map(slug => santiseSlug(slug.toString))
-			.getOrElse(createTimeStampFileName(clock))
+	def createLinkNames(req: HttpRequest)(using clock: Clock): (String, String) = {
+		val linkName = createNewResourceName(req)
 		val linkTo = linkToName(linkName, req.entity.contentType)
 		(linkName, linkTo)
 	}
+	
+	def createNewResourceName(req: HttpRequest)(using clock: Clock): String = {
+		req.headers.collectFirst{case Slug(name) => name}
+			.map(slug => santiseSlug(slug.toString))
+			.getOrElse(createTimeStampFileName)
+	}
+	
+	val ldpc = Uri("http://www.w3.org/ns/ldp#BasicContainer")
+	val ldpr = Uri("http://www.w3.org/ns/ldp#Resource")
+	//get all the  URIs with link rel="type"
+	def filterLDPTypeLinks(links: Seq[Link]): Seq[Uri] = 
+		import akka.http.scaladsl.model.headers.LinkParams.rel
+		links.flatMap{ link =>
+			link.values.collect {
+				case LinkValue(uri, params) if params.collectFirst({case rel("type") => true}).isDefined => uri
+			}              
+		}
+	
+	val Ok(ldpcLinkHeaders,_) = HttpHeader.parse(
+		"Link",
+		"""<http://www.w3.org/ns/ldp#BasicContainer>; rel="type",
+		  |<http://www.w3.org/ns/ldp#Resource>; rel="type"""".stripMargin.replace("\n", "")
+	)
 
 	// log.info(s"created LDPC($ldpcUri,$root)")
 
@@ -159,6 +184,12 @@ object BasicContainer {
 		replyTo: ActorRef[HttpResponse]
 	)(using val mat: Materializer, val ec: ExecutionContext) extends ReqCmd
 
+	/** Message for initial creation of container, after creation of dir. HttpRequest in Do.  */
+	case class CreateContainer(
+		name: Path, cmd: Do
+	)(using
+	  val mat: Materializer, val ec: ExecutionContext
+	) extends Cmd
 
 	// responses from child to parent
 	case class ChildTerminated(name: String) extends Cmd
@@ -280,8 +311,18 @@ class BasicContainer private(
 
 		lazy val start: Behavior[Cmd] = {
 			Behaviors.receiveMessage[Cmd] { (msg: Cmd) =>
-				import BasicContainer.ChildTerminated
+				import BasicContainer.{ChildTerminated, CreateContainer}
 				msg match
+					case create: CreateContainer => 
+						// we don't do much at this point. For later
+						import akka.http.scaladsl.model.StatusCodes.Created
+						create.cmd.replyTo ! HttpResponse(
+							Created,
+							Seq(Location(containerUrl.withPath(containerUrl.path/"")),
+								BasicContainer.ldpcLinkHeaders
+							)
+						)
+						Behaviors.same
 					case act: Do => run(act)
 					case routeMsg: Route => routeHttpReq(routeMsg)
 					case ChildTerminated(name) =>
@@ -345,6 +386,11 @@ class BasicContainer private(
 				(ref, new Dir(contains + (linkName -> ref),counters))
 			}
 			
+		def createDir(newDirName: String): Try[(CRef, Dir)] =
+			Attributes.createDir(dirPath, newDirName) .map{ att =>
+				val ref = context.spawn(att,urlFor(newDirName))
+				(ref, new Dir(contains + (newDirName -> ref),counters))
+			}
 
 			
 		/** state monad fn	- return counter for given base name so that one can create the next name 
@@ -380,7 +426,7 @@ class BasicContainer private(
 				case e => context.log.warn(s"Can't save counter value $count for <$countFile>", e)
 			}
 
-
+		
 		protected
 		def run(msg: Do): Behavior[Cmd] = 
 			import akka.stream.alpakka.file.scaladsl.Directory
@@ -403,23 +449,47 @@ class BasicContainer private(
 					Behaviors.same
 				case POST =>  //create resource
 					//todo: create sub container for LDPC Post
-					import BasicContainer.createName
-					val (linkName: String, linkTo: String) = createName(msg.req)
-					val response: Try[(RRef, Dir)] = createSymLink(linkName,linkTo).recoverWith {
-						case e : FileAlreadyExistsException =>   // this is the pattern of a state monad!
-							val (nextId, newDir) = nextCounterFor(linkName)
-							val nextLinkName = linkName+"_"+nextId
-							newDir.createSymLink(nextLinkName,linkToName(nextLinkName,entity.contentType))
-					}
-					response match {
-						case Success((ref, dir)) =>
-							ref.actor ! CreateResource(dirPath.resolve(ref.att.to),msg)
-							dir.start
-						case Failure(e) => 
-							HttpResponse(InternalServerError, Seq(),
-								HttpEntity(`text/x-java-source`.withCharset(HttpCharsets.`UTF-8`), e.toString) )
-							Behaviors.same
-					}
+					import java.time.Clock
+					import BasicContainer.{createLinkNames, filterLDPTypeLinks,createNewResourceName,ldpc,ldpr}
+					import BasicContainer.{given Clock}
+					val types = filterLDPTypeLinks(headers[Link])
+					if types.contains(ldpc) then
+						//todo: should one also parse the body first to check that it is well formed? Or should that
+						//   be left to the created actor - which may have to delete itself if not. 
+						val newDirName = createNewResourceName(msg.req)
+						val response: Try[(CRef, Dir)] = createDir(newDirName).recoverWith {
+							case e : FileAlreadyExistsException =>   // this is the pattern of a state monad!
+								val (nextId, newDir) = nextCounterFor(newDirName)
+								val nextDirName = newDirName+"_"+nextId
+								newDir.createDir(nextDirName)
+						}
+						response match {
+							case Success((cref, dir)) =>
+								cref.actor ! BasicContainer.CreateContainer(cref.att.path,msg)
+								dir.start
+							case Failure(e) =>
+								HttpResponse(InternalServerError, Seq(),
+									HttpEntity(`text/x-java-source`.withCharset(HttpCharsets.`UTF-8`), e.toString) )
+								Behaviors.same
+						}
+					else 	
+						val (linkName: String, linkTo: String) = createLinkNames(msg.req)
+						val response: Try[(RRef, Dir)] = createSymLink(linkName,linkTo).recoverWith {
+							case e : FileAlreadyExistsException =>   // this is the pattern of a state monad!
+								val (nextId, newDir) = nextCounterFor(linkName)
+								val nextLinkName = linkName+"_"+nextId
+								newDir.createSymLink(nextLinkName,linkToName(nextLinkName,entity.contentType))
+						}
+						response match {
+							case Success((ref, dir)) =>
+								ref.actor ! CreateResource(dirPath.resolve(ref.att.to),msg)
+								dir.start
+							case Failure(e) => 
+								HttpResponse(InternalServerError, Seq(),
+									HttpEntity(`text/x-java-source`.withCharset(HttpCharsets.`UTF-8`), e.toString) )
+								Behaviors.same
+						}
+					end if
 				//todo: create new PUT request and forward to new actor?
 				//or just save the content to the file?
 				case _ =>

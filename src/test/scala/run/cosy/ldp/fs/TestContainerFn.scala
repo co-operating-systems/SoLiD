@@ -9,7 +9,7 @@ class TestContainerFn extends munit.FunSuite {
 	import model.{ContentType, ContentTypes, HttpRequest, Uri, HttpEntity}
 	import run.cosy.http.Headers.Slug
 	import run.cosy.http.{Encoding => cEncoding}
-	import run.cosy.ldp.fs.BasicContainer.createName
+	import run.cosy.ldp.fs.{BasicContainer=>bc}
 
 	import java.time.{Clock, Instant, ZoneId}
 	
@@ -22,7 +22,7 @@ class TestContainerFn extends munit.FunSuite {
 			         Option(slugTxt).map(t=>Slug(t.asClean)).toSeq,
 						HttpEntity(Option(ct).getOrElse(`application/octet-stream`),ByteString())
 					)                                                  
-		val (name, linkTo) = createName(req,testClock)
+		val (name, linkTo) = bc.createLinkNames(req)(using testClock)
 		assertEquals(name,expectedLinkName,req)
 		assertEquals(linkTo,expectedLinkTo,req)
 	end testSlug
@@ -42,5 +42,23 @@ class TestContainerFn extends munit.FunSuite {
 
 		testSlug("Readme_2",ContentTypes.`text/plain(UTF-8)`,"Readme2","Readme2.conf")
 	}
+	
+	test("Link relations") {
+		import akka.http.scaladsl.model.HttpHeader
+		import akka.http.scaladsl.model.headers.Link
+		import akka.http.scaladsl.model.HttpHeader.ParsingResult.Ok
+		import akka.http.scaladsl.model.headers.LinkParam
+		import akka.http.scaladsl.model.headers.LinkParams.rel
+		import akka.http.scaladsl.model.headers.LinkValue
 
+
+		val Ok(l@Link(_), _) = HttpHeader.parse(
+			"Link",
+			"""<http://www.w3.org/ns/ldp#BasicContainer>; rel="type",
+			  |<http://www.w3.org/ns/ldp#Resource>; rel="type"""".stripMargin.replace("\n", "")
+		)
+		val x = BasicContainer.filterLDPTypeLinks(Seq(l))
+		assertEquals(x.size,2)
+		assertEquals(x, Seq(Uri("http://www.w3.org/ns/ldp#BasicContainer"),Uri("http://www.w3.org/ns/ldp#Resource")))
+	}
 }

@@ -5,6 +5,7 @@ import akka.actor.typed.{ActorRef, ActorSystem, Behavior, Scheduler}
 import akka.http.scaladsl.client.RequestBuilding.{Get, Post}
 import akka.http.scaladsl.model.headers.{Accept, Location}
 import akka.http.scaladsl.model.{HttpEntity, HttpResponse, MediaRanges, StatusCodes, Uri}
+
 import akka.http.scaladsl.testkit.ScalatestRouteTest
 import akka.util.Timeout
 import org.scalatest.matchers.should.Matchers
@@ -48,41 +49,87 @@ class TestSolidRouteSpec extends AnyWordSpec with Matchers with ScalatestRouteTe
 	end withServer
 			
 	class SolidTestPost(solid: Solid):
-		def post(slug: String, text: String, count: String = "") =
-			Post(toUri("/"), HttpEntity(text)).withHeaders(Slug(slug)) ~>
+		def newResource(baseDir: Uri, slug: Slug, text: String): Uri =
+			Post(baseDir, HttpEntity(text)).withHeaders(slug) ~>
 				solid.route ~> check {
 				status shouldEqual StatusCodes.Created
-				header[Location].get shouldEqual Location(Uri(s"http://localhost:8080/Hello$count"))
+				val loc: Location = header[Location].get 
+				loc.uri
 			}
-		def read(text: String, count: String, times: Int = 1) =
+			
+		def newContainer(baseDir: Uri, slug: Slug): Uri =
+			Post(baseDir).withHeaders(slug,BasicContainer.ldpcLinkHeaders) ~>
+				solid.route ~> check {
+					status shouldEqual StatusCodes.Created
+					header[Location].get.uri
+			}
+		
+		def read(url: Uri, text: String, times: Int = 1) =
 			for (_ <- 1 to times)
-				Get(toUri("/Hello" + count)).withHeaders(Accept(MediaRanges.`*/*`)) ~> solid.route ~> check {
+				Get(url).withHeaders(Accept(MediaRanges.`*/*`)) ~> solid.route ~> check {
 					responseAs[String] shouldEqual text
 				}
+		
 	end SolidTestPost
 	
 	"The Server" when {
+		val rootC =  toUri("/")
+
 		"started for the first time" in withServer { solid =>
 			val test = new SolidTestPost(solid)
-
+			
+			Get(rootUri).withHeaders(Accept(MediaRanges.`*/*`)) ~> solid.route ~> check {
+				status shouldEqual StatusCodes.MovedPermanently
+				header[Location].get shouldEqual Location(rootC)
+			}
+			
 			//enable creation a new resource with POST and read it 3 times
-			test.post("Hello", "Hello World!")
-			test.read("Hello World!", "", 3)
+			val newUri = test.newResource(rootC, Slug("Hello"), "Hello World!")
+			newUri equals toUri("/Hello")
+			test.read(newUri,"Hello World!", 3)
 
 			//enable creation other resources with the same Slug and GET them too
-			for (count <- (2 to 5).toList.map("_" + _.toString)) {
-				test.post("Hello", s"Hello World $count!", count)
-				test.read(s"Hello World $count!", count, 3)
+			for (count <- (2 to 5).toList) {
+				val createdUri = test.newResource(rootC, Slug("Hello"), s"Hello World $count!")
+				assert(createdUri.path.endsWith(s"Hello_$count"))
+				test.read(createdUri,s"Hello World $count!", 3)
 			}
+			
+			val blogDir = test.newContainer(rootC, Slug("blog"))
+			blogDir shouldEqual toUri("/blog/")
+
+			//enable creation a new resource with POST and read it 3 times
+			val content =  "My First Blog Post is great"
+			val firstBlogUri = test.newResource(blogDir, Slug("First Blog"),content)
+			firstBlogUri equals toUri("/blog/FirstBlog")
+			test.read(firstBlogUri,content, 3)
+
+			for (count <- (2 to 5).toList) {
+				val content =  s"My Cat had $count babies"
+				val blogDir = test.newContainer(rootC, Slug("blog"))
+				blogDir shouldEqual toUri(s"/blog_$count/")
+				val firstBlogUri = test.newResource(blogDir, Slug(s"A Blog in $count"),content)
+				firstBlogUri equals toUri(s"/blog_$count/ABlogIn$count")
+				test.read(firstBlogUri, content, 2)
+				//todo: read contents of dir to see contents added
+			}
+			
 		}
 
 		"restarted" in withServer { solid =>
 			val test = new SolidTestPost(solid)
 
-			//enable creation more resources with the same Slug and GET them too
-			for (count <- (6 to 9).toList.map("_" + _.toString)) {
-				test.post("Hello", s"Hello World $count!", count)
-				test.read(s"Hello World $count!", count, 3)
+			//enable creation of more resources with the same Slug and GET them too
+			for (count <- (6 to 9).toList) {
+				val createdUri = test.newResource(rootC, Slug("Hello"), s"Hello World $count!")
+				assert(createdUri.path.endsWith(s"Hello_$count"))
+				test.read(createdUri,s"Hello World $count!", 3)
+			}
+
+			for (count <- (6 to 7).toList) {
+				val blogDir = test.newContainer(rootC, Slug("blog"))
+				blogDir shouldEqual toUri(s"/blog_$count/")
+				//todo: read contents of dir to see contents added
 			}
 		}
 	}

@@ -19,6 +19,9 @@ object Attributes {
 	
 	import run.cosy.ldp.fs.Attributes.Attributes
 
+	import java.nio.file.Paths
+	import java.nio.file.attribute.FileTime
+
 	sealed trait Attributes(path: Path, att: BasicFileAttributes, collectedAt: Instant)
 
 	def apply(fileName: Path, att: BasicFileAttributes, 
@@ -37,6 +40,27 @@ object Attributes {
 			val att = Files.readAttributes(path, classOf[BasicFileAttributes], NOFOLLOW_LINKS)
 			Attributes(path,att)
 		}
+	
+	def createDir(inDir: Path, dirName: String): Try[DirAtt] = Try {
+		val path = inDir.resolve(dirName)
+		val newDirPath = Files.createDirectory(path)
+		val now = Instant.now()
+		val ftNow = FileTime.from(now)
+		DirAtt(newDirPath,
+			new BasicFileAttributes {
+				override def lastModifiedTime(): FileTime = ftNow
+				override def lastAccessTime(): FileTime = ftNow
+				override def creationTime(): FileTime = ftNow
+				override def isRegularFile: Boolean = false
+				override def isDirectory: Boolean = true
+				override def isSymbolicLink: Boolean = false
+				override def isOther: Boolean = false
+				override def size(): Long = 0
+				override def fileKey(): AnyRef = null
+			},
+			now
+		)
+	}
 
 	/**
 	 * Create a Symbolic Link
