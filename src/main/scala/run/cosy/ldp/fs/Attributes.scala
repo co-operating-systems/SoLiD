@@ -29,10 +29,13 @@ object Attributes {
 		if (att.isDirectory) DirAtt(fileName,att,collectedAt)
 		else if (att.isSymbolicLink) {
 			val linkTo = Files.readSymbolicLink(fileName)
-			SymLink(fileName, linkTo, att, collectedAt)
+			if linkTo.endsWith(".archive") then
+				Archived(fileName, att, collectedAt)
+			else SymLink(fileName, linkTo, att, collectedAt)
 		}
 		else OtherAtt(fileName,att,collectedAt)
 
+	/** Fails with the exceptions from Files.readAttributes() */
 	def forPath(path: Path): Try[Attributes] =
 		import java.nio.file.LinkOption.NOFOLLOW_LINKS
 		import java.nio.file.attribute.BasicFileAttributes
@@ -94,6 +97,7 @@ object Attributes {
 
 	//todo: may want to remove this later. Just here to help me refactor code
 	sealed trait ActorFileAttr extends Attributes
+	sealed trait Other extends Attributes
 	
 	case class DirAtt private[Attributes] (
 		path: Path, att: BasicFileAttributes, collectedAt: Instant
@@ -105,6 +109,10 @@ object Attributes {
 	
 	case class OtherAtt private[Attributes] (
 		path: Path, att: BasicFileAttributes, collectedAt: Instant
-	) extends Attributes(path,att,collectedAt)
+	) extends Other with Attributes(path,att,collectedAt)
+	
+	case class Archived private[Attributes] (
+		path: Path, att: BasicFileAttributes, collectedAt: Instant
+	) extends Other with Attributes(path,att,collectedAt)
 
 }

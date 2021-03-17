@@ -16,7 +16,7 @@ class Spawner(val context: ActorContext[Cmd]) extends AnyVal {
 	import org.slf4j.Logger
 	import run.cosy.ldp.fs.Attributes.ActorFileAttr
 
-	def spawn(dir: DirAtt, url: Uri)(
+	def spawnDir(dir: DirAtt, url: Uri)(
 		using reg: ResourceRegistry
 	): CRef = {
 		val name = dir.path.getFileName.toString
@@ -25,7 +25,7 @@ class Spawner(val context: ActorContext[Cmd]) extends AnyVal {
 		CRef(dir, ref)
 	}
 
-	def spawn(link: SymLink, url: Uri): RRef = {
+	def spawnSymLink(link: SymLink, url: Uri): RRef = {
 		val name = link.path.getFileName.toString
 		val ref = context.spawn(Resource(url, link.path, link.to, name), name)
 		context.watchWith(ref, ChildTerminated(name))
@@ -37,8 +37,8 @@ class Spawner(val context: ActorContext[Cmd]) extends AnyVal {
 	): Ref =
 		import org.slf4j.Logger
 		dir match 
-		case d: DirAtt => spawn(d,url)
-		case s: SymLink => spawn(s,url)
+		case d: DirAtt => spawnDir(d,url)
+		case s: SymLink => spawnSymLink(s,url)
 	
 	
 	def log: Logger = context.log

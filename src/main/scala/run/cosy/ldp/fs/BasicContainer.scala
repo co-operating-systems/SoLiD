@@ -3,7 +3,7 @@ package run.cosy.ldp.fs
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, Behavior, PostStop, PreRestart}
 import akka.http.scaladsl.model
-import akka.http.scaladsl.model.StatusCodes.{InternalServerError, MovedPermanently, NotFound, NotImplemented, OK}
+import akka.http.scaladsl.model.StatusCodes.{InternalServerError, MovedPermanently, NotFound, NotImplemented, OK, Gone, PermanentRedirect, Created}
 import akka.http.scaladsl.model.headers.{Link, LinkParam, LinkValue, `Content-Type`}
 import akka.http.scaladsl.model.{HttpRequest, HttpResponse, Uri}
 import akka.http.scaladsl.server.ContentNegotiator.Alternative
@@ -118,24 +118,24 @@ object BasicContainer {
 		val linkTo = linkToName(linkName, req.entity.contentType)
 		(linkName, linkTo)
 	}
-	
+
 	def createNewResourceName(req: HttpRequest)(using clock: Clock): String = {
 		req.headers.collectFirst{case Slug(name) => name}
 			.map(slug => santiseSlug(slug.toString))
 			.getOrElse(createTimeStampFileName)
 	}
-	
+
 	val ldpc = Uri("http://www.w3.org/ns/ldp#BasicContainer")
 	val ldpr = Uri("http://www.w3.org/ns/ldp#Resource")
 	//get all the  URIs with link rel="type"
-	def filterLDPTypeLinks(links: Seq[Link]): Seq[Uri] = 
+	def filterLDPTypeLinks(links: Seq[Link]): Seq[Uri] =
 		import akka.http.scaladsl.model.headers.LinkParams.rel
 		links.flatMap{ link =>
 			link.values.collect {
 				case LinkValue(uri, params) if params.collectFirst({case rel("type") => true}).isDefined => uri
-			}              
+			}
 		}
-	
+
 	val Ok(ldpcLinkHeaders,_) = HttpHeader.parse(
 		"Link",
 		"""<http://www.w3.org/ns/ldp#BasicContainer>; rel="type",
@@ -162,7 +162,7 @@ object BasicContainer {
 	sealed trait ReqCmd extends Cmd {
 		val req: HttpRequest
 		val replyTo: ActorRef[HttpResponse]
-	} 
+	}
 
 	/** @param path the path to the final resource */
 	final case class Route(
@@ -202,48 +202,52 @@ object BasicContainer {
  * Our convetion for files on the FS at present (later to be modularized) is designed
  * to avoid needing to load the container contents into memory, and to allow content negotiation
  * to work both locally and on the file system. These are the rules:
- *  1. The root of the file is the string up to the first "."(directories don't have that restriction)
+ *  1. The root of the file is the string up to the first "." (same with directories)
  *  1. All roots have a symbolic link to the original resource. So if `cat.raw` is a large picture loaded first
- *     then `cat` is a symbolic link to `cat.raw`. Later the resource actor can keep copies of other versions 
+ *     then `cat` is a symbolic link to `cat.raw`. Later the resource actor can keep copies of other versions
  *     for other devices such as smart phones, but link will keep track of which is the original file.
  *  1. Requests for `cat.jpg` are passed to the `cat` child actor that can deal with content negotiation for that
  *    resource
  *  1. Languagee based content negotiation (not implemented) would on a request for `blog` search for `blog.en.html`
- *  1. The file pointed to by the symlink will contain metadata (perhaps extended attributes) informing the server of other versions. 
- *  1. The directory will contain xattrs of its own: 
+ *  1. The file pointed to by the symlink will contain metadata (perhaps extended attributes) informing the server of other versions.
+ *  1. The directory will contain xattrs of its own:
  *    - one of these will be set after the actor has gone through the directory to set all the symlinks, so it knows
  *      that it need not do it again
  *    - others?
- *  1. To be able to deal with Multiple Posts of content with the same Slug (Eg. If a POST with `Slug: My Blog` 
+ *  1. To be able to deal with Multiple Posts of content with the same Slug (Eg. If a POST with `Slug: My Blog`
  *     is posted 3 times) the container needs to know what the next version is without having to download the whole dir.
- *     We can add metadata for a symlink so that the container can know that the next name should be MyBlog_4, 
+ *     We can add metadata for a symlink so that the container can know that the next name should be MyBlog_4,
  *     without needing to search for MyBlog_1`, `MyBlog_2` and `MyBlog_3`
  *     This avoids having to create ugly hash based file names.
  *  1. alternatively instead of using xattrs every root could come with a `x.meta.ttl` that contains the file
  *     meta-data
- *
- *  Some Advantages:
+ *  1. If a resource `cat` is deleted the actor will create a `cat.archive` directory and move all associatd files there.
+ *     (this is to be able to recover from a problem half way through deleting.) 
+ *     The `cat` link is removed and a new one created to the archive directory. This will allow us to enforce a memory
+ *     that a file is no longer available. Better methods of doing this could be possible.
  *  
+ *  Some Advantages:
+ *
  *  - The symbolic link trick allows Content Negotiation to  work correctly when files are edited on the FS direectly,
- *  since links with relative URLs in one document to the root name of a file, can be viewed locally as if they 
+ *  since links with relative URLs in one document to the root name of a file, can be viewed locally as if they
  *  were Negotiated by local editors, since they can find the file by following the symbolic link.
  *  - It also helps a lot for RDF formats: If the first version uploaded is `card.ttl` then `card` will link to `card.ttl`
- *  and that file can be the one updated on PATCH or PUT. 
+ *  and that file can be the one updated on PATCH or PUT.
  *  - We want to make Content Negotiation work right out of the box, so as to avoid changes in format preferences
  *    (such as a move from ttl to json-ld or vice versa, breaking all the links)
- *  - There are important speed advantage to be had, by using xattrs as that avoids walking the whole directory 
+ *  - There are important speed advantage to be had, by using xattrs as that avoids walking the whole directory
  *     - an actor only needs to check if the root of the file (e.g. `blog`) exists, which is one call to the FS. If the file exists, then the Container can start the child actor, and later pass on calls to it
  *     - The child actor can retrieve the Xattrs from the original file, to find out where the variants are.
  *     Otherwise the Containere would need to load the whole directory contents in memory, which could be slow if too many
  *     files are listed there, and the result would uses up a lot of memory. (this may be negligeable for a few directores,
  *     but could become problematic for a large number of open ones).
- *    
- *  Notes: 
- *    - the actor could load the full dir data into memory on a container that is heavily used when needed. 
+ *
+ *  Notes:
+ *    - the actor could load the full dir data into memory on a container that is heavily used when needed.
  *    - ideally the attributes should be mapped to the files, so that it should be possible to recover them by
  *      running through the files
  *
- * @param containerUrl the URL of the container. (without the slash, so that it is east to write `ctnr / path`) 
+ * @param containerUrl the URL of the container. (without the slash, so that it is east to write `ctnr / path`)
  * @param dirPath      the path on the filesystem that corresponds to the container
  */
 class BasicContainer private(
@@ -260,15 +264,15 @@ class BasicContainer private(
 	import akka.http.scaladsl.model.MediaTypes.{`text/plain`, `text/x-java-source`}
 	import akka.http.scaladsl.model.headers.{Link, LinkParams, LinkValue, Location, `Content-Type`}
 	import akka.http.scaladsl.model.{ContentTypes, HttpCharsets, HttpEntity, HttpMethods}
-	import HttpMethods.{GET, POST}
+	import HttpMethods.{GET, POST, DELETE}
 	import Resource.CreateResource
-	import Attributes.ActorFileAttr
 	import run.cosy.ldp.fs.{Ref,CRef,RRef}
-	
+	import run.cosy.ldp.fs.Attributes.{Attributes, Archived, OtherAtt, ActorFileAttr, Other}
+
 	import java.nio.file.attribute.BasicFileAttributes
 	import java.time.Instant
-	//Cashed Contents of Directory 
-	type Contents = HashMap[String,Ref|ActorFileAttr]
+	//Cashed Contents of Directory
+	type Contents = HashMap[String,Ref|Other]
 	type Counter  = Map[String, Int]
 	// one could add a behavior for if it exists but is not a container
 
@@ -291,11 +295,11 @@ class BasicContainer private(
 	def urlFor(name: String): Uri = containerUrl.withPath(containerUrl.path / name)
 
 
-//	def notContainerBehavior(exists: Boolean): Behaviors.Receive[Cmd] = 
+//	def notContainerBehavior(exists: Boolean): Behaviors.Receive[Cmd] =
 //		val exists = Files.exists(dirPath)
 //		Behaviors.receiveMessage[Cmd] { msg =>
 //			msg match
-//				case Route(path, HttpRequest(PUT, _, _, _, _), replyTo) => 
+//				case Route(path, HttpRequest(PUT, _, _, _, _), replyTo) =>
 //					replyTo ! HttpResponse(MethodNotAllowed, entity = s"PUT not implemented")
 //				case Route(_, req,replyTo) => replyTo ! HttpResponse(NotFound, entity = s"could not find ${req.uri}")
 //				case Do(req,replyTo) => replyTo ! HttpResponse(MethodNotAllowed, entity = s"Not implemented")
@@ -306,16 +310,17 @@ class BasicContainer private(
 	//to avoid requests to the FS
 	class Dir(contains: Contents = HashMap(), counters: Counter = HashMap()) {
 
+
 		import java.nio.file.attribute.BasicFileAttributes
 		import java.time.Instant
+		import scala.annotation.tailrec
 
 		lazy val start: Behavior[Cmd] = {
 			Behaviors.receiveMessage[Cmd] { (msg: Cmd) =>
 				import BasicContainer.{ChildTerminated, CreateContainer}
 				msg match
-					case create: CreateContainer => 
+					case create: CreateContainer =>
 						// we don't do much at this point. For later
-						import akka.http.scaladsl.model.StatusCodes.Created
 						create.cmd.replyTo ! HttpResponse(
 							Created,
 							Seq(Location(containerUrl.withPath(containerUrl.path/"")),
@@ -336,7 +341,7 @@ class BasicContainer private(
 					Behaviors.same
 			}
 		}
-		
+
 		/**
 		 * Get Ref for name by checking in cache, and if not on the FS. It does not create an actor for the Ref.
 		 * (An improved version could decide not to check the FS if a full upload of the FS properties have just
@@ -346,14 +351,14 @@ class BasicContainer private(
 		 * @prefix createActorIfNeeded if the resource has not actor associated with it, created it first
 		 * @return the Ref and the new Dir state, or None of there is no Reference at that location.
 		 * */
-		def getRef(name: String): Option[(Ref, Dir)] =
-			contains.get(name).map { (v : Ref|ActorFileAttr)  =>
-				import Attributes.{DirAtt, SymLink}
-				v match 
+		def getRef(name: String): Option[(Ref|Other, Dir)] =
+			contains.get(name).map { (v : Ref|Other)  =>
+				v match
 				case ref: Ref => (ref, Dir.this)
 				case fa: ActorFileAttr  =>
 					val r = context.spawn(fa,urlFor(name))
-					(r, new Dir(contains + (name -> r), counters))	
+					(r, new Dir(contains + (name -> r), counters))
+				case ar: Other => (ar, Dir.this)
 			}.orElse {
 				import java.io.IOException
 				import java.nio.file.LinkOption.NOFOLLOW_LINKS
@@ -363,7 +368,9 @@ class BasicContainer private(
 					case Success(att: ActorFileAttr) =>
 						val r: Ref = context.spawn(att,urlFor(name))
 						Some((r, new Dir(contains + (name -> r), counters)))
-					case Failure(err) => 
+					case Success(aro : Other) => 
+						Some((aro, new Dir(contains + (name -> aro), counters)))	
+					case Failure(err) =>
 						err match
 						case e: UnsupportedOperationException =>
 							context.log.error(s"Cannot get BasicFileAttributes! JDK misconfigured on request <$path>", e)
@@ -374,36 +381,35 @@ class BasicContainer private(
 						case e: SecurityException =>
 							context.log.warn(s"Security Exception on searching for attributes on <$path>.", e)
 							None
-					case _ => None
 			}
 		end getRef
 
-				
+
 		// state monad	fn. create symlink to new file (we don't have an actor for it yet)
 		def createSymLink(linkName: String, linkTo: String): Try[(RRef, Dir)] =
 			Attributes.createLink(dirPath, linkName,linkTo).map{ att =>
-				val ref = context.spawn(att,urlFor(linkName))
+				val ref = context.spawnSymLink(att,urlFor(linkName))
 				(ref, new Dir(contains + (linkName -> ref),counters))
 			}
-			
+
 		def createDir(newDirName: String): Try[(CRef, Dir)] =
 			Attributes.createDir(dirPath, newDirName) .map{ att =>
-				val ref = context.spawn(att,urlFor(newDirName))
+				val ref = context.spawnDir(att,urlFor(newDirName))
 				(ref, new Dir(contains + (newDirName -> ref),counters))
 			}
 
-			
-		/** state monad fn	- return counter for given base name so that one can create the next name 
-		 * e.g. for base name `cat`  and number 3 the next created file could be `cat_3` */ 
+
+		/** state monad fn	- return counter for given base name so that one can create the next name
+		 * e.g. for base name `cat`  and number 3 the next created file could be `cat_3` */
 		def nextCounterFor(baseName: String): (Int, Dir) =
 			val newcounter: Int = findSiblingCount(baseName)+1
 			(newcounter, new Dir(contains, counters + (baseName -> newcounter)))
-			
+
 		def countFile(countFileRoot: String): java.io.File = dirPath.resolve(countFileRoot + ".count").toFile
-		
-		/** You need to update the counter if you use it. 
+
+		/** You need to update the counter if you use it.
 		 *  This suggests one should have monadic interface on the config data */
-		def findSiblingCount(countFileRoot: String): Int = { 
+		def findSiblingCount(countFileRoot: String): Int = {
 			counters.get(countFileRoot).getOrElse {
 				val cf = countFile(countFileRoot)
 				Using(new BufferedReader(new FileReader(cf))) { (reader: BufferedReader) =>
@@ -418,17 +424,17 @@ class BasicContainer private(
 
 		//todo: save such info to disk on shutdown
 		def writeSiblingCount(countFileRoot: String, count: Int): Counter = counters + (countFileRoot -> (count+1))
-		
-		def saveSiblingsCountFor(name: String, count: Int): Unit = 
+
+		def saveSiblingsCountFor(name: String, count: Int): Unit =
 			Using(new BufferedWriter(new FileWriter(countFile(name)))) { (writer: BufferedWriter) =>
 				writer.write(count.toString)
 			} recover {
 				case e => context.log.warn(s"Can't save counter value $count for <$countFile>", e)
 			}
 
-		
+
 		protected
-		def run(msg: Do): Behavior[Cmd] = 
+		def run(msg: Do): Behavior[Cmd] =
 			import akka.stream.alpakka.file.scaladsl.Directory
 			import msg.{ec, mat, req}
 			import req._
@@ -443,7 +449,7 @@ class BasicContainer private(
 				case GET => //return visible contents of directory
 					msg.replyTo ! HttpResponse(
 						OK, Seq(),
-						HttpEntity(ContentTypes.`text/plain(UTF-8)`, 
+						HttpEntity(ContentTypes.`text/plain(UTF-8)`,
 							Directory.ls(dirPath).map(p => ByteString(p.toString + "\n")))
 					)
 					Behaviors.same
@@ -455,7 +461,7 @@ class BasicContainer private(
 					val types = filterLDPTypeLinks(headers[Link])
 					if types.contains(ldpc) then
 						//todo: should one also parse the body first to check that it is well formed? Or should that
-						//   be left to the created actor - which may have to delete itself if not. 
+						//   be left to the created actor - which may have to delete itself if not.
 						val newDirName = createNewResourceName(msg.req)
 						val response: Try[(CRef, Dir)] = createDir(newDirName).recoverWith {
 							case e : FileAlreadyExistsException =>   // this is the pattern of a state monad!
@@ -472,7 +478,7 @@ class BasicContainer private(
 									HttpEntity(`text/x-java-source`.withCharset(HttpCharsets.`UTF-8`), e.toString) )
 								Behaviors.same
 						}
-					else 	
+					else //create resource
 						val (linkName: String, linkTo: String) = createLinkNames(msg.req)
 						val response: Try[(RRef, Dir)] = createSymLink(linkName,linkTo).recoverWith {
 							case e : FileAlreadyExistsException =>   // this is the pattern of a state monad!
@@ -484,12 +490,16 @@ class BasicContainer private(
 							case Success((ref, dir)) =>
 								ref.actor ! CreateResource(dirPath.resolve(ref.att.to),msg)
 								dir.start
-							case Failure(e) => 
+							case Failure(e) =>
 								HttpResponse(InternalServerError, Seq(),
 									HttpEntity(`text/x-java-source`.withCharset(HttpCharsets.`UTF-8`), e.toString) )
 								Behaviors.same
 						}
 					end if
+				case DELETE =>
+					//todo: check that there are no contents in the directory then delete
+					HttpResponse(NotImplemented, Seq(), entity = s"have not implemented  ${msg.req.method} for ${msg.req.uri}")
+					Behaviors.same	
 				//todo: create new PUT request and forward to new actor?
 				//or just save the content to the file?
 				case _ =>
@@ -500,7 +510,7 @@ class BasicContainer private(
 		protected
 		def routeHttpReq(msg: Route): Behavior[Cmd] = {
 			context.log.info(
-				s"received msg: ${msg.req.uri} in ${dirPath.toFile.getAbsolutePath} in container with uri $containerUrl")
+				s"received ${msg.req.method.value} <${msg.req.uri}> in ${dirPath.toFile.getAbsolutePath} in container with uri $containerUrl")
 
 			msg.next match
 				case doit: Do =>
@@ -514,24 +524,31 @@ class BasicContainer private(
 		//  but getRef can also return a RRef... So `cat.jpg` 
 		//  here would return a `cat.jpg` RRef rather than `cat` or a `CRef`
 		//  this indicates that the path name must be set after checking the attributes!
-		def forwardToContainer(name: String, msg: ReqCmd): Behavior[Cmd] = 
-			getRef(name) match 
-				case Some((ref,dir)) =>
-					ref match
+		def forwardToContainer(name: String, msg: ReqCmd): Behavior[Cmd] = { 
+			if name.contains('.') then 
+				msg.replyTo ! HttpResponse(NotFound,
+					entity=HttpEntity("This Solid server serves no resources with a '.' char in path segments (except for the last `file` segment)."))
+				Behaviors.same
+			else getRef(name) match 
+				case Some(x, dir) =>
+					x match 
 					case CRef(att, actor) => actor ! msg
 					case RRef(att, actor) => // there is no container, so redirect to resource
 						msg match
-							case Do(req, replyTo) =>  //we're at the path end, so we can redirect
-								val uri = msg.req.uri
-								val redirectTo = uri.withPath(uri.path.reverse.tail.reverse)
-								replyTo ! HttpResponse(MovedPermanently, Seq(Location(redirectTo)))
-							case Route(path, req, replyTo) => // the path passes through a file, so it must end here
-								replyTo ! HttpResponse(NotFound, Seq(), s"Resource with URI ${req.uri} does not exist")
+						case Do(req, replyTo) =>  //we're at the path end, so we can redirect
+							val uri = msg.req.uri
+							val redirectTo = uri.withPath(uri.path.reverse.tail.reverse)
+							replyTo ! HttpResponse(MovedPermanently, Seq(Location(redirectTo)))
+						case Route(path, req, replyTo) => // the path passes through a file, so it must end here
+							replyTo ! HttpResponse(NotFound, Seq(), s"Resource with URI ${req.uri} does not exist")
+					case _: Archived => msg.replyTo ! HttpResponse(Gone)
+					case _: OtherAtt => msg.replyTo ! HttpResponse(NotFound)	
 					dir.start
-				case None => { msg.replyTo ! HttpResponse(NotFound, Seq(),
-					HttpEntity(`text/plain`.withCharset(`UTF-8`),
-							s"""Resource with URI ${msg.req.uri} does not exist."""))
-					Behaviors.same }
+				case None =>  
+					msg.replyTo ! HttpResponse(NotFound,
+											entity = HttpEntity(s"""Resource with URI ${msg.req.uri} does not exist."""))
+					Behaviors.same
+		}
 		end forwardToContainer
 		
 		
@@ -544,26 +561,24 @@ class BasicContainer private(
 		protected
 		def forwardMsgToResourceActor(name: String, msg: Do): Behavior[Cmd] =
 			val dotLessName = actorNameFor(name)
-			val obj = getRef(dotLessName)
-			obj match
-				case Some((ref,dir)) => {
-					ref match {
-						case CRef(att, actor) => msg.replyTo ! {
-							if (dotLessName == name)
-								val uri = msg.req.uri
-								HttpResponse(MovedPermanently, Seq(Location(uri.withPath(uri.path / ""))))
-							else HttpResponse(NotFound)
-						}
-						case RRef(att, actor) => actor ! msg
-						case null => context.log.warn(s"did not match anthing in $dirPath: received ref ="+ref)
-					}
-					dir.start
+			getRef(dotLessName) match
+			case Some(x,dir) =>
+				x match 
+				case CRef(_,actor) =>	msg.replyTo ! {
+					if (dotLessName == name)
+						val uri = msg.req.uri
+						HttpResponse(MovedPermanently, Seq(Location(uri.withPath(uri.path / ""))))
+					else HttpResponse(NotFound)
 				}
-				case None => msg.replyTo ! HttpResponse(NotFound,
-					entity = HttpEntity(`text/plain`.withCharset(`UTF-8`),
-						s"""Resource with URI ${msg.req.uri} does not exist. 
-							|Try posting to <${containerUrl}> container first.""".stripMargin))
-					Behaviors.same
+				case RRef(_, actor) => actor ! msg
+				case _: Archived => msg.replyTo ! HttpResponse(Gone)
+				case _: OtherAtt => msg.replyTo ! HttpResponse(NotFound)
+				dir.start
+			case None => msg.replyTo ! HttpResponse(NotFound,
+									entity = HttpEntity(`text/plain`.withCharset(`UTF-8`),
+									s"""Resource with URI ${msg.req.uri} does not exist. 
+									|Try posting to <${containerUrl}> container first.""".stripMargin))
+				Behaviors.same
 		end forwardMsgToResourceActor
 		
 		/**

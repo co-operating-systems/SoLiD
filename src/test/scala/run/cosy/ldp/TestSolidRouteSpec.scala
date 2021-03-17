@@ -2,7 +2,6 @@ package run.cosy.ldp
 
 import akka.actor.testkit.typed.scaladsl.{ActorTestKit, TestProbe}
 import akka.actor.typed.{ActorRef, ActorSystem, Behavior, Scheduler}
-import akka.http.scaladsl.client.RequestBuilding.{Get, Post}
 import akka.http.scaladsl.model.headers.{Accept, Location}
 import akka.http.scaladsl.model.{HttpEntity, HttpResponse, MediaRanges, StatusCodes, Uri}
 
@@ -21,6 +20,7 @@ import run.cosy.ldp.testUtils.TmpDir.{createDir, deleteDir}
 class TestSolidRouteSpec extends AnyWordSpec with Matchers with ScalatestRouteTest {
 
 	import akka.http.scaladsl.server.Directives
+	import akka.http.scaladsl.client.{RequestBuilding=>Req}
 
 	val dirPath: Path = createDir("solidTest_")
 	
@@ -36,7 +36,7 @@ class TestSolidRouteSpec extends AnyWordSpec with Matchers with ScalatestRouteTe
 
 	import akka.http.scaladsl.model.headers
 	
-	def toUri(path: String) = rootUri.withPath(Uri.Path(path))
+	def toUri(path: String): Uri = rootUri.withPath(Uri.Path(path))
 
 	def withServer(test: Solid => Any): Unit =
 		val testKit = ActorTestKit()
@@ -50,7 +50,7 @@ class TestSolidRouteSpec extends AnyWordSpec with Matchers with ScalatestRouteTe
 			
 	class SolidTestPost(solid: Solid):
 		def newResource(baseDir: Uri, slug: Slug, text: String): Uri =
-			Post(baseDir, HttpEntity(text)).withHeaders(slug) ~>
+			Req.Post(baseDir, HttpEntity(text)).withHeaders(slug) ~>
 				solid.route ~> check {
 				status shouldEqual StatusCodes.Created
 				val loc: Location = header[Location].get 
@@ -58,7 +58,7 @@ class TestSolidRouteSpec extends AnyWordSpec with Matchers with ScalatestRouteTe
 			}
 			
 		def newContainer(baseDir: Uri, slug: Slug): Uri =
-			Post(baseDir).withHeaders(slug,BasicContainer.ldpcLinkHeaders) ~>
+			Req.Post(baseDir).withHeaders(slug,BasicContainer.ldpcLinkHeaders) ~>
 				solid.route ~> check {
 					status shouldEqual StatusCodes.Created
 					header[Location].get.uri
@@ -66,7 +66,7 @@ class TestSolidRouteSpec extends AnyWordSpec with Matchers with ScalatestRouteTe
 		
 		def read(url: Uri, text: String, times: Int = 1) =
 			for (_ <- 1 to times)
-				Get(url).withHeaders(Accept(MediaRanges.`*/*`)) ~> solid.route ~> check {
+				Req.Get(url).withHeaders(Accept(MediaRanges.`*/*`)) ~> solid.route ~> check {
 					responseAs[String] shouldEqual text
 				}
 		
@@ -78,7 +78,7 @@ class TestSolidRouteSpec extends AnyWordSpec with Matchers with ScalatestRouteTe
 		"started for the first time" in withServer { solid =>
 			val test = new SolidTestPost(solid)
 			
-			Get(rootUri).withHeaders(Accept(MediaRanges.`*/*`)) ~> solid.route ~> check {
+			Req.Get(rootUri).withHeaders(Accept(MediaRanges.`*/*`)) ~> solid.route ~> check {
 				status shouldEqual StatusCodes.MovedPermanently
 				header[Location].get shouldEqual Location(rootC)
 			}
@@ -93,6 +93,18 @@ class TestSolidRouteSpec extends AnyWordSpec with Matchers with ScalatestRouteTe
 				val createdUri = test.newResource(rootC, Slug("Hello"), s"Hello World $count!")
 				assert(createdUri.path.endsWith(s"Hello_$count"))
 				test.read(createdUri,s"Hello World $count!", 3)
+			}
+			
+			Req.Delete(newUri) ~> solid.route ~> check {
+				status shouldEqual StatusCodes.NoContent
+			}
+			
+			Req.Get(newUri).withHeaders(Accept(MediaRanges.`*/*`)) ~> solid.route ~> check {
+				status shouldEqual StatusCodes.Gone
+			}
+
+			Req.Get( toUri("/Hello.archive/")).withHeaders(Accept(MediaRanges.`*/*`)) ~> solid.route ~> check {
+				status shouldEqual StatusCodes.NotFound
 			}
 			
 			val blogDir = test.newContainer(rootC, Slug("blog"))
@@ -134,7 +146,7 @@ class TestSolidRouteSpec extends AnyWordSpec with Matchers with ScalatestRouteTe
 		}
 	}
 
-	override def afterAll(): Unit = 
+	override def afterAll(): Unit = () 
 		deleteDir(dirPath)
 
 }
