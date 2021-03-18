@@ -7,7 +7,7 @@ package run.cosy.http
  **/
 object RDFMediaTypes {
 
-	import akka.http.scaladsl.model.MediaType
+	import akka.http.scaladsl.model.{MediaType,Uri}
 	import akka.http.scaladsl.model.HttpCharsets.{`UTF-8`,`US-ASCII`}
 	
 	/** see [[https://www.w3.org/TR/rdf-syntax-grammar/#section-MIME-Type RDF1.1 XML Syntax]] spec and 
@@ -64,8 +64,7 @@ object RDFMediaTypes {
 	 */
 	val `text/n3` = MediaType.customWithFixedCharset(
 		"text","n3", `UTF-8`,
-		fileExtensions = "n3",
-		params = 
+		fileExtensions = List("n3")
 	)
 	/**
 	 * see [[https://www.w3.org/TR/json-ld/#application-ld-json JSON-LD 1.1]]
