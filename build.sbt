@@ -33,6 +33,8 @@ lazy val root = project
 			"ch.qos.logback" % "logback-classic" % "1.2.3",
 			"org.typelevel" %% "cats-core" % "2.4.2",
 			"org.typelevel" %% "cats-free" % "2.4.2",
+			"net.bblfish.rdf" %% "banana-rdf" % "0.8.5-SNAPSHOT",
+			"net.bblfish.rdf" %% "banana-jena" % "0.8.5-SNAPSHOT",
 
 			//"com.novocode" % "junit-interface" % "0.11" % "test"
 		).map(_.withDottyCompat(scalaVersion.value)),
