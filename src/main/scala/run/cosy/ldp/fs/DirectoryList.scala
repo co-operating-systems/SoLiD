@@ -1,0 +1,65 @@
+package run.cosy.ldp.fs
+
+import akka.stream.{Attributes, Outlet, SourceShape}
+import akka.stream.stage.{GraphStage, GraphStageLogic, OutHandler, StageLogging}
+
+import java.io.IOException
+import java.nio.file.{Files, Path}
+import java.nio.file.attribute.BasicFileAttributes
+import java.util.function.BiPredicate
+import java.util.stream
+import javax.naming.directory.BasicAttribute
+
+object DirectoryList {
+	                  
+	import java.nio.file.{Path, SimpleFileVisitor,Files}
+
+	def apply(
+		dir: Path,
+		depth: Int = 1)(
+		matcher: (Path, BasicFileAttributes) => Boolean = (p,a) => true
+	): GraphStage[SourceShape[(Path,BasicFileAttributes)]] = new DirectoryList(dir, depth, matcher)
+
+}
+
+
+class DirectoryList(
+	dir: Path,
+	maxDepth: Int = 1,
+	matcher: (Path, BasicFileAttributes) => Boolean = (p,a) => true 
+) extends GraphStage[SourceShape[(Path,BasicFileAttributes)]]:
+	import scala.jdk.FunctionConverters.*
+	import scala.jdk.OptionConverters.*
+	
+	val out: Outlet[(Path,BasicFileAttributes)] = Outlet("PathAttributeSource")
+	override val shape = SourceShape(out)
+
+
+	override def createLogic(inheritedAttributes: Attributes): GraphStageLogic =
+		new GraphStageLogic(shape) {
+			private var next: (Path,BasicFileAttributes) = _
+
+			def append(path: Path, att: BasicFileAttributes): Boolean = 
+				val matched = matcher(path,att)
+				if matched then next = (path,att)
+				matched
+			
+			private val pathStream = Files.find(dir, maxDepth, append.asJava)
+			private val sit = pathStream.iterator()
+			
+			setHandler(out, new OutHandler {
+				override def onPull(): Unit =  
+					if sit.hasNext then
+						sit.next()
+						push(out,next)
+					else
+						pathStream.close()	
+						complete(out)
+				
+
+				override def onDownstreamFinish(cause: Throwable): Unit =
+					pathStream.close()	
+					super.onDownstreamFinish(cause)
+			})
+		}
+end DirectoryList

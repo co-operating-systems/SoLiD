@@ -3,13 +3,13 @@ package run.cosy.ldp.fs
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, Behavior, PostStop, PreRestart}
 import akka.http.scaladsl.model
-import akka.http.scaladsl.model.StatusCodes.{InternalServerError, MovedPermanently, NotFound, NotImplemented, OK, Gone, PermanentRedirect, Created}
+import akka.http.scaladsl.model.StatusCodes.{Created, Gone, InternalServerError, MovedPermanently, NotFound, NotImplemented, OK, PermanentRedirect}
 import akka.http.scaladsl.model.headers.{Link, LinkParam, LinkValue, `Content-Type`}
 import akka.http.scaladsl.model.{HttpRequest, HttpResponse, Uri}
 import akka.http.scaladsl.server.ContentNegotiator.Alternative
 import akka.http.scaladsl.server.ContentNegotiator.Alternative.ContentType
 import akka.http.scaladsl.server.{RequestContext, RouteResult}
-import akka.stream.scaladsl.{FileIO, RunnableGraph, Source}
+import akka.stream.scaladsl.{Concat, FileIO, Merge, RunnableGraph, Source}
 import akka.stream.{ActorMaterializer, IOResult, Materializer}
 import akka.util.ByteString
 import akka.{Done, NotUsed}
@@ -26,9 +26,8 @@ import java.time.{LocalDate, LocalDateTime, ZoneId, ZoneOffset}
 import java.util.{Locale, stream}
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success, Try, Using}
-//import run.cosy.http.Slug
-
 import akka.event.slf4j.Slf4jLogger
+import run.cosy.http.RDFMediaTypes
 import run.cosy.ldp.fs.BasicContainer
 import run.cosy.ldp.fs.BasicContainer.Cmd
 import run.cosy.ldp.ResourceRegistry
@@ -84,7 +83,10 @@ object BasicContainer {
 	import akka.http.scaladsl.model.HttpHeader
 	import akka.http.scaladsl.model.HttpHeader.ParsingResult.Ok
 
+	import java.nio.file.{FileTreeIterator, FileVisitOption}
 	import java.time.{Clock, Instant}
+	import java.util.{Spliterator, Spliterators}
+	import java.util.stream.{Stream, StreamSupport}
 
 	/** A collection of "unwise" characters according to [[https://tools.ietf.org/html/rfc2396#section-2.4.3 RFC 2396]]. */
 	val UnwiseChars = """{}|\^[]`"""
@@ -99,13 +101,15 @@ object BasicContainer {
 	val Remove = (UnwiseChars + Delims + GenDelims + SubDelims + ReactiveSolidDelims).toSet
 
 	val MaxFileName = 100
+	
 	given clock: Clock = Clock.systemDefaultZone
 
 	def santiseSlug(slugTxt: String): String =
-		val santized: String = slugTxt.takeWhile(_ != '.').filterNot(c => Remove.contains(c) || c.isWhitespace)
+		val santized = slugTxt.takeWhile(_ != '.').filterNot(c => Remove.contains(c) || c.isWhitespace)
 		santized.substring(0, Math.min(MaxFileName, santized.size))
-
+	
 	val timeFormat = DateTimeFormatter.ofPattern("yyyyMMdd-N").withZone(ZoneId.of("UTC"))
+	
 	def createTimeStampFileName(using clock: Clock): String =  timeFormat.format(LocalDateTime.now(clock))
 
 	//todo: add Content-Encoding, Content-Language
@@ -124,6 +128,22 @@ object BasicContainer {
 			.map(slug => santiseSlug(slug.toString))
 			.getOrElse(createTimeStampFileName)
 	}
+
+//	import java.nio.file.{FileTreeWalker,FileVisitOption}
+//	def ls(start: Path, options: FileVisitOption*): Source[FileTreeWalker.Event, NotUsed] = 
+//		val iterator = new FileTreeIterator(start, 1, options)
+//		val factory = () => try {
+//			val spliterator = Spliterators.spliteratorUnknownSize(iterator, Spliterator.DISTINCT)
+//			StreamSupport.stream(spliterator, false).onClose(iterator.close)
+//		} catch {
+//			case e@(_: (Error | RuntimeException)) =>
+//				iterator.close()
+//				throw e
+//		}
+//		import akka.stream.scaladsl.StreamConverters
+//		//todo: factory throws an Exception, where is that caught?
+//		StreamConverters.fromJavaStream(factory)
+//	end ls
 
 	val ldpc = Uri("http://www.w3.org/ns/ldp#BasicContainer")
 	val ldpr = Uri("http://www.w3.org/ns/ldp#Resource")
@@ -222,10 +242,10 @@ object BasicContainer {
  *  1. alternatively instead of using xattrs every root could come with a `x.meta.ttl` that contains the file
  *     meta-data
  *  1. If a resource `cat` is deleted the actor will create a `cat.archive` directory and move all associatd files there.
- *     (this is to be able to recover from a problem half way through deleting.) 
+ *     (this is to be able to recover from a problem half way through deleting.)
  *     The `cat` link is removed and a new one created to the archive directory. This will allow us to enforce a memory
  *     that a file is no longer available. Better methods of doing this could be possible.
- *  
+ *
  *  Some Advantages:
  *
  *  - The symbolic link trick allows Content Negotiation to  work correctly when files are edited on the FS direectly,
@@ -294,8 +314,31 @@ class BasicContainer private(
 	// url for resource with `name` in this container
 	def urlFor(name: String): Uri = containerUrl.withPath(containerUrl.path / name)
 
+	/** Return a Source for reading the relevant files for this directory.
+	 * Note: all symbolic links and dirs are our resources, so long as they 
+	 * don't have a `.` in them. 
+	 *  
+	 * todo: now that we have symlinks to archives, we would need to test every symlink for
+	 * what it links to! So we should perhaps instead use a plain file for deleted resources!
+	 * */
+	val dirList: Source[(Path, BasicFileAttributes), NotUsed] = Source.fromGraph(
+		DirectoryList(dirPath){ (path: Path, att: BasicFileAttributes) =>
+			att.isSymbolicLink || (att.isDirectory && !path.getFileName.toString.contains('.'))
+		})
+	val prefix: Source[String,NotUsed] = Source(
+		List("@prefix stat: <http://www.w3.org/ns/posix/stat#> .\n",
+		"@prefix ldp: <http://www.w3.org/ns/ldp#> .\n\n"))
+	
+	def containsAsTurtle(path: Path, att: BasicFileAttributes): String = { 
+		val filename = path.getFileName.toString + { if att.isDirectory then "/" else "" }
+		s"""<> ldp:contains <$filename> .
+			|    <$filename> stat:size ${att.size};
+			|        stat:mtime ${att.lastModifiedTime().toMillis};
+			|        stat:ctime ${att.creationTime().toMillis} .
+			|""".stripMargin
+	}
 
-//	def notContainerBehavior(exists: Boolean): Behaviors.Receive[Cmd] =
+	//	def notContainerBehavior(exists: Boolean): Behaviors.Receive[Cmd] =
 //		val exists = Files.exists(dirPath)
 //		Behaviors.receiveMessage[Cmd] { msg =>
 //			msg match
@@ -310,6 +353,8 @@ class BasicContainer private(
 	//to avoid requests to the FS
 	class Dir(contains: Contents = HashMap(), counters: Counter = HashMap()) {
 
+
+		import akka.stream.alpakka.file.scaladsl.Directory
 
 		import java.nio.file.attribute.BasicFileAttributes
 		import java.time.Instant
@@ -368,8 +413,8 @@ class BasicContainer private(
 					case Success(att: ActorFileAttr) =>
 						val r: Ref = context.spawn(att,urlFor(name))
 						Some((r, new Dir(contains + (name -> r), counters)))
-					case Success(aro : Other) => 
-						Some((aro, new Dir(contains + (name -> aro), counters)))	
+					case Success(aro : Other) =>
+						Some((aro, new Dir(contains + (name -> aro), counters)))
 					case Failure(err) =>
 						err match
 						case e: UnsupportedOperationException =>
@@ -431,7 +476,7 @@ class BasicContainer private(
 			} recover {
 				case e => context.log.warn(s"Can't save counter value $count for <$countFile>", e)
 			}
-
+		
 
 		protected
 		def run(msg: Do): Behavior[Cmd] =
@@ -449,8 +494,8 @@ class BasicContainer private(
 				case GET => //return visible contents of directory
 					msg.replyTo ! HttpResponse(
 						OK, Seq(),
-						HttpEntity(ContentTypes.`text/plain(UTF-8)`,
-							Directory.ls(dirPath).map(p => ByteString(p.toString + "\n")))
+						HttpEntity(RDFMediaTypes.`text/turtle`.toContentType,
+							Source.combine(prefix,dirList.map(containsAsTurtle))(Concat(_)).map(s =>ByteString(s)))
 					)
 					Behaviors.same
 				case POST =>  //create resource
@@ -499,13 +544,22 @@ class BasicContainer private(
 				case DELETE =>
 					//todo: check that there are no contents in the directory then delete
 					HttpResponse(NotImplemented, Seq(), entity = s"have not implemented  ${msg.req.method} for ${msg.req.uri}")
-					Behaviors.same	
+					Behaviors.same
 				//todo: create new PUT request and forward to new actor?
 				//or just save the content to the file?
 				case _ =>
 					HttpResponse(NotImplemented, Seq(), entity = s"have not implemented  ${msg.req.method} for ${msg.req.uri}")
 					Behaviors.same
 		end run
+
+//		def listContents: Source[ByteString, NotUsed] = {
+//			import java.nio.file.FileTreeWalker
+//			BasicContainer.ls(dirPath).map{ (e: FileTreeWalker.Event) =>
+//				ByteString(
+//					s"""<> ldp:contains ${e.}
+//						|""".stripMargin)
+//			}
+//		}
 
 		protected
 		def routeHttpReq(msg: Route): Behavior[Cmd] = {
@@ -524,14 +578,14 @@ class BasicContainer private(
 		//  but getRef can also return a RRef... So `cat.jpg` 
 		//  here would return a `cat.jpg` RRef rather than `cat` or a `CRef`
 		//  this indicates that the path name must be set after checking the attributes!
-		def forwardToContainer(name: String, msg: ReqCmd): Behavior[Cmd] = { 
-			if name.contains('.') then 
+		def forwardToContainer(name: String, msg: ReqCmd): Behavior[Cmd] = {
+			if name.contains('.') then
 				msg.replyTo ! HttpResponse(NotFound,
 					entity=HttpEntity("This Solid server serves no resources with a '.' char in path segments (except for the last `file` segment)."))
 				Behaviors.same
-			else getRef(name) match 
+			else getRef(name) match
 				case Some(x, dir) =>
-					x match 
+					x match
 					case CRef(att, actor) => actor ! msg
 					case RRef(att, actor) => // there is no container, so redirect to resource
 						msg match
@@ -542,9 +596,9 @@ class BasicContainer private(
 						case Route(path, req, replyTo) => // the path passes through a file, so it must end here
 							replyTo ! HttpResponse(NotFound, Seq(), s"Resource with URI ${req.uri} does not exist")
 					case _: Archived => msg.replyTo ! HttpResponse(Gone)
-					case _: OtherAtt => msg.replyTo ! HttpResponse(NotFound)	
+					case _: OtherAtt => msg.replyTo ! HttpResponse(NotFound)
 					dir.start
-				case None =>  
+				case None =>
 					msg.replyTo ! HttpResponse(NotFound,
 											entity = HttpEntity(s"""Resource with URI ${msg.req.uri} does not exist."""))
 					Behaviors.same
@@ -563,7 +617,7 @@ class BasicContainer private(
 			val dotLessName = actorNameFor(name)
 			getRef(dotLessName) match
 			case Some(x,dir) =>
-				x match 
+				x match
 				case CRef(_,actor) =>	msg.replyTo ! {
 					if (dotLessName == name)
 						val uri = msg.req.uri
@@ -576,7 +630,7 @@ class BasicContainer private(
 				dir.start
 			case None => msg.replyTo ! HttpResponse(NotFound,
 									entity = HttpEntity(`text/plain`.withCharset(`UTF-8`),
-									s"""Resource with URI ${msg.req.uri} does not exist. 
+									s"""Resource with URI ${msg.req.uri} does not exist.
 									|Try posting to <${containerUrl}> container first.""".stripMargin))
 				Behaviors.same
 		end forwardMsgToResourceActor
