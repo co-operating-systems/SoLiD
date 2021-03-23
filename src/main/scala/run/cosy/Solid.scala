@@ -109,10 +109,7 @@ object Solid {
 	case class StartFailed(cause: Throwable) extends Run
 	case class Started(binding: ServerBinding) extends Run
 	case object Stop extends Run
-
-	//ActorSystem.t
-	// where was this?
-
+	
 }
 
 /**
@@ -154,7 +151,6 @@ class Solid(
 		reqc.log.info("routing req " + reqc.request.uri)
 		val (remaining, actor): (List[String], ActorRef[BasicContainer.Cmd]) = registry.getActorRef(path)
 			.getOrElse((List[String](), rootRef))
-		println("remaining=" + remaining)
 		def cmdFn(ref: ActorRef[HttpResponse]): BasicContainer.Cmd = remaining match {
 			case Nil =>  BasicContainer.Do(reqc.request,ref)
 			case head::tail => BasicContainer.Route(NonEmptyList(head,tail), reqc.request, ref)

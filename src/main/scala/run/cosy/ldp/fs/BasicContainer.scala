@@ -130,7 +130,7 @@ object BasicContainer {
 	}
 
 //	import java.nio.file.{FileTreeWalker,FileVisitOption}
-//	def ls(start: Path, options: FileVisitOption*): Source[FileTreeWalker.Event, NotUsed] = 
+//	def ls(start: Path, options: FileVisitOption*): Source[FileTreeWalker.Event, NotUsed] =
 //		val iterator = new FileTreeIterator(start, 1, options)
 //		val factory = () => try {
 //			val spliterator = Spliterators.spliteratorUnknownSize(iterator, Spliterator.DISTINCT)
@@ -315,21 +315,21 @@ class BasicContainer private(
 	def urlFor(name: String): Uri = containerUrl.withPath(containerUrl.path / name)
 
 	/** Return a Source for reading the relevant files for this directory.
-	 * Note: all symbolic links and dirs are our resources, so long as they 
-	 * don't have a `.` in them. 
-	 *  
+	 * Note: all symbolic links and dirs are our resources, so long as they
+	 * don't have a `.` in them.
+	 *
 	 * todo: now that we have symlinks to archives, we would need to test every symlink for
 	 * what it links to! So we should perhaps instead use a plain file for deleted resources!
 	 * */
 	val dirList: Source[(Path, BasicFileAttributes), NotUsed] = Source.fromGraph(
-		DirectoryList(dirPath){ (path: Path, att: BasicFileAttributes) =>
+		DirectoryList(dirPath,1){ (path: Path, att: BasicFileAttributes) =>
 			att.isSymbolicLink || (att.isDirectory && !path.getFileName.toString.contains('.'))
 		})
 	val prefix: Source[String,NotUsed] = Source(
 		List("@prefix stat: <http://www.w3.org/ns/posix/stat#> .\n",
 		"@prefix ldp: <http://www.w3.org/ns/ldp#> .\n\n"))
-	
-	def containsAsTurtle(path: Path, att: BasicFileAttributes): String = { 
+
+	def containsAsTurtle(path: Path, att: BasicFileAttributes): String = {
 		val filename = path.getFileName.toString + { if att.isDirectory then "/" else "" }
 		s"""<> ldp:contains <$filename> .
 			|    <$filename> stat:size ${att.size};
@@ -364,6 +364,7 @@ class BasicContainer private(
 			Behaviors.receiveMessage[Cmd] { (msg: Cmd) =>
 				import BasicContainer.{ChildTerminated, CreateContainer}
 				msg match
+					case act: Do => run(act)
 					case create: CreateContainer =>
 						// we don't do much at this point. For later
 						create.cmd.replyTo ! HttpResponse(
@@ -373,7 +374,6 @@ class BasicContainer private(
 							)
 						)
 						Behaviors.same
-					case act: Do => run(act)
 					case routeMsg: Route => routeHttpReq(routeMsg)
 					case ChildTerminated(name) =>
 						reg.removePath(containerUrl.path / name)
@@ -476,7 +476,7 @@ class BasicContainer private(
 			} recover {
 				case e => context.log.warn(s"Can't save counter value $count for <$countFile>", e)
 			}
-		
+
 
 		protected
 		def run(msg: Do): Behavior[Cmd] =

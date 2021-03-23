@@ -24,9 +24,9 @@ class DirectoryListSpec extends AkkaSpec {
 		import akka.stream.stage.GraphStageLogic
 		import akka.stream.stage.OutHandler
 		
-		val sourceGraph = DirectoryList(Path.of("."),depth=10)()
+		val sourceGraph = DirectoryList(Path.of("test"),depth=2)()
 		val result = Source.fromGraph(sourceGraph).runForeach{ (p: Path,att: BasicFileAttributes) => 
-			println(s"received <$p> : dir=${att.isDirectory}")
+			//todo
 		}
 		
 		Await.result(result,10.seconds)

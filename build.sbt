@@ -35,6 +35,7 @@ lazy val root = project
 			"org.typelevel" %% "cats-free" % "2.4.2",
 			"net.bblfish.rdf" %% "banana-rdf" % "0.8.5-SNAPSHOT",
 			"net.bblfish.rdf" %% "banana-jena" % "0.8.5-SNAPSHOT",
+			"org.tomitribe" % "tomitribe-http-signatures" % "1.7",
 
 			//"com.novocode" % "junit-interface" % "0.11" % "test"
 		).map(_.withDottyCompat(scalaVersion.value)),

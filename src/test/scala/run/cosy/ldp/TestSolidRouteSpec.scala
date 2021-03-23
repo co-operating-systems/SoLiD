@@ -146,7 +146,6 @@ class TestSolidRouteSpec extends AnyWordSpec with Matchers with ScalatestRouteTe
 		}
 	}
 
-	override def afterAll(): Unit = () 
-		deleteDir(dirPath)
+	override def afterAll(): Unit = deleteDir(dirPath)
 
 }
