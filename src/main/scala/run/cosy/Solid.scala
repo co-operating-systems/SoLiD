@@ -4,17 +4,23 @@ import akka.Done
 import akka.actor.CoordinatedShutdown
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors, LoggerOps}
 import akka.actor.typed.{ActorRef, ActorSystem, Behavior, PostStop, Scheduler}
+import akka.http.scaladsl.settings.ParserSettings
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.Http.ServerBinding
 import akka.http.scaladsl.model.Uri.Path.{Empty, Segment, Slash}
 import akka.http.scaladsl.model
 import akka.http.scaladsl.model.{HttpResponse, Uri}
 import akka.http.scaladsl.server.Directives
+import akka.http.scaladsl.server.Directives.{complete, extract, extractRequestContext}
 import akka.http.scaladsl.server.{RequestContext, Route, RouteResult}
+import akka.http.scaladsl.settings.ServerSettings
 import akka.http.scaladsl.util.FastFuture
 import akka.util.Timeout
 import cats.data.NonEmptyList
 import com.typesafe.config.{Config, ConfigFactory}
+import run.cosy.http.RDFMediaTypes
+import run.cosy.http.auth.HttpSig
+import run.cosy.http.auth.HttpSig.{Agent, PublicKeyAlgo}
 import run.cosy.ldp.ResourceRegistry
 import run.cosy.ldp.fs.BasicContainer
 
@@ -46,10 +52,13 @@ object Solid {
 			given timeout: Scheduler = system.scheduler
 			given ec: ExecutionContext = ctx.executionContext
 
+			val ps = ParserSettings.forServer(system).withCustomMediaTypes(RDFMediaTypes.all :_*)
+			val serverSettings = ServerSettings(system).withParserSettings(ps)
 
 			val serverBinding = Http()
 				.newServerAt(uri.authority.host.address(), uri.authority.port)
-				.bind(solid.route)
+				.withSettings(serverSettings)
+				.bind(solid.routeLdp())
         
 			ctx.pipeToSelf(serverBinding) {
 				case Success(binding) =>
@@ -68,8 +77,6 @@ object Solid {
 					Started(binding)
 				case Failure(ex) => StartFailed(ex)
 			}
-
-			
 			
 			def running(binding: ServerBinding): Behavior[Run] =
 				Behaviors.receiveMessagePartial[Run] {
@@ -144,17 +151,28 @@ class Solid(
 	given timeout: Scheduler = sys.scheduler
 	given scheduler: Timeout = Timeout(5.second)
 	
+	def fetch(uri: Uri): Future[PublicKeyAlgo] = ???
 
-	lazy val route: Route = (reqc: RequestContext) => {
+	lazy val securedRoute: Route = extractRequestContext { (reqc: RequestContext) =>
+		HttpSig.httpSignature(reqc)(fetch).optional.tapply { 
+			case Tuple1(Some(agent)) => routeLdp(agent)
+			case Tuple1(None) => routeLdp()	
+		}
+	}
+
+	
+	def routeLdp(agent: Agent = new Agent{}): Route = (reqc: RequestContext) => {
 		val path = reqc.request.uri.path
 		import reqc.{given}
 		reqc.log.info("routing req " + reqc.request.uri)
 		val (remaining, actor): (List[String], ActorRef[BasicContainer.Cmd]) = registry.getActorRef(path)
 			.getOrElse((List[String](), rootRef))
+
 		def cmdFn(ref: ActorRef[HttpResponse]): BasicContainer.Cmd = remaining match {
-			case Nil =>  BasicContainer.Do(reqc.request,ref)
-			case head::tail => BasicContainer.Route(NonEmptyList(head,tail), reqc.request, ref)
+			case Nil => BasicContainer.Do(reqc.request, ref)
+			case head :: tail => BasicContainer.Route(NonEmptyList(head, tail), reqc.request, ref)
 		}
+
 		actor.ask[HttpResponse](cmdFn).map(RouteResult.Complete(_))
 	}
 

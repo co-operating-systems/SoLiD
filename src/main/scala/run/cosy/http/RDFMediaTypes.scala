@@ -1,5 +1,10 @@
 package run.cosy.http
 
+import akka.actor.typed.ActorSystem
+import akka.http.scaladsl.model.MediaTypes
+import akka.http.scaladsl.model.MediaTypes.extensionMap
+import akka.http.scaladsl.settings.ParserSettings
+
 /**
  * Media Types for RDF.  
  * Collected from the [[https://docs.aws.amazon.com/neptune/latest/userguide/sparql-media-type-support.html RDF media types used by SPARQL in Neptune]] document by Amazon.
@@ -39,7 +44,7 @@ object RDFMediaTypes {
 	/** The older version of n-quads was limited to US-ASCII and had a different mime type */
 	val `text/n-quads` = MediaType.customWithFixedCharset(
 		"text","n-quads",`US-ASCII`,
-			fileExtensions = List("nq")
+			fileExtensions = List("nqAscii")
 	)
 
 	/**
@@ -106,5 +111,11 @@ object RDFMediaTypes {
 		"application","sparql-results+xml",
 		fileExtensions =  List("srx")
 	)
-	
+
+	def all: Seq[MediaType] = Seq(`application/rdf+xml`, `application/n-triples`, `application/n-quads`,
+		`text/n-quads`,`text/turtle`,`application/trig`, `text/n3`,`application/ld+json`,
+		`application/sparql-results+json`, `application/sparql-results+xml`, `application/trix`
+	)
+
+
 }

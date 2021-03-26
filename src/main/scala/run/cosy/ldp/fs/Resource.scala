@@ -9,6 +9,7 @@ import akka.http.scaladsl.model._
 import akka.http.scaladsl.model.headers.{Accept, Location, `Content-Type`}
 import akka.stream.IOResult
 import akka.stream.scaladsl.FileIO
+import run.cosy.http.FileExtensions
 import run.cosy.ldp.ResourceRegistry
 import run.cosy.ldp.fs.BasicContainer.{Cmd, Do, Route}
 import run.cosy.ldp.fs.Resource.connegNamesFor
@@ -69,7 +70,7 @@ object Resource {
 //    guard = context.actorOf(Props(new Guard(ldprUri,List())))
 //  }
 
-	def mediaType(path: FPath): MediaType = MediaTypes.forExtension(extension(path))
+	def mediaType(path: FPath): MediaType = FileExtensions.forExtension(extension(path))
 
 	def extension(path: FPath) = {
 		val file = path.getFileName.toString
