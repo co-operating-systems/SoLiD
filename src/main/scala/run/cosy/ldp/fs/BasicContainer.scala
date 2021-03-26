@@ -173,7 +173,7 @@ object BasicContainer {
 	): Behavior[Cmd] = Behaviors.setup[Cmd] { (context: ActorContext[Cmd]) =>
 		//val exists = Files.exists(root)
 		reg.addActorRef(containerUrl.path, context.self)
-		context.log.info("started actor at " + containerUrl.path)
+		context.log.info(s"started actor for <${containerUrl}> in dir <file:/${dir.toAbsolutePath}>")
 		new BasicContainer(containerUrl, dir, new Spawner(context)).behavior
 	}
 
@@ -397,6 +397,7 @@ class BasicContainer private(
 		 * @return the Ref and the new Dir state, or None of there is no Reference at that location.
 		 * */
 		def getRef(name: String): Option[(Ref|Other, Dir)] =
+			context.log.info(s"in <$dirPath>.getRef($name)")
 			contains.get(name).map { (v : Ref|Other)  =>
 				v match
 				case ref: Ref => (ref, Dir.this)
@@ -409,6 +410,7 @@ class BasicContainer private(
 				import java.nio.file.LinkOption.NOFOLLOW_LINKS
 				import java.nio.file.attribute.BasicFileAttributes
 				val path = dirPath.resolve(name)  //todo: also can throw exception
+				context.log.info(s"resolved <$dirPath>.resolve($name)=$path")
 				Attributes.forPath(path) match
 					case Success(att: ActorFileAttr) =>
 						val r: Ref = context.spawn(att,urlFor(name))
@@ -571,7 +573,7 @@ class BasicContainer private(
 					if doit.req.uri.path.endsWithSlash then
 						forwardToContainer(msg.name, msg)
 					else forwardMsgToResourceActor(msg.name, doit)
-				case route: Route => forwardToContainer(msg.name, msg)
+				case route: Route => forwardToContainer(msg.name, route)
 		}
 
 		//todo: do we need a name cleanup happen? Perhaps we don't need that for containers?
