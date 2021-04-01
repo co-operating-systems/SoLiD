@@ -16,7 +16,7 @@ object RDF {
 	export Jena.given
 
 	extension (uri: Uri)
-		def toRdf = ops.URI(uri.toString)
+		def toRdf: Rdf#Node = ops.URI(uri.toString)
 
 }
 

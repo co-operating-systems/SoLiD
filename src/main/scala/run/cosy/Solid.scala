@@ -19,6 +19,7 @@ import akka.http.scaladsl.util.FastFuture
 import akka.util.Timeout
 import cats.data.NonEmptyList
 import com.typesafe.config.{Config, ConfigFactory}
+import org.w3.banana.PointedGraph
 import run.cosy.http.{IResponse, RDFMediaTypes, RdfParser}
 import run.cosy.http.auth.{HttpSig, SigningData}
 import run.cosy.http.auth.HttpSig.{Agent, Anonymous, WebServerAgent}
@@ -27,6 +28,7 @@ import run.cosy.ldp.fs.BasicContainer
 
 import java.io.{File, FileInputStream}
 import java.nio.file.{Files, Path}
+import javax.naming.AuthenticationException
 import scala.annotation.tailrec
 import scala.concurrent.{ExecutionContext, Future}
 import scala.io.StdIn
@@ -154,15 +156,20 @@ class Solid(
 
 	def fetchKeyId(keyIdUrl: Uri)(reqc: RequestContext): Future[SigningData] = {
 		import RouteResult.{Complete,Rejected}
-		import run.cosy.RDF.{given,_}
+		import run.cosy.RDF.{given,_}, run.cosy.RDF.ops.{given,*}
 		given ec: ExecutionContext = reqc.executionContext
 		val req = RdfParser.rdfRequest(keyIdUrl)
 		if keyIdUrl.isRelative then  //we get the resource locally
 			routeLdp(WebServerAgent)(reqc.withRequest(req)).flatMap{
-				case Complete(response) => RdfParser.unmarshalToRDF(response,keyIdUrl).map{ (g: IResponse[Rdf#Graph]) =>
-					 ???
+				case Complete(response) => RdfParser.unmarshalToRDF(response,keyIdUrl).flatMap{ (g: IResponse[Rdf#Graph]) =>
+					import http.auth.JWKExtractor.*, http.auth.JW2JCA.jw2rca
+					 PointedGraph(keyIdUrl.toRdf,g.content).asKeyIdInfo match
+						case Some(kidInfo) => FastFuture(jw2rca(kidInfo.pka))
+						case None => FastFuture.failed(http.AuthException(null, //todo
+							s"Could not find or parse security:publicKeyJwk relation in <$keyIdUrl>"
+						 ))
 				}
-				case Rejected(rejections) => ???
+				case r: Rejected => FastFuture(Failure(new Throwable(r.toString))) //todo
 			}
 		else // we get it from the web
 			???
