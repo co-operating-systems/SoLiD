@@ -1,5 +1,6 @@
 package run.cosy.http.auth
 
+import akka.http.scaladsl.model.HttpHeader.ParsingResult
 import akka.http.scaladsl.model.HttpHeader.ParsingResult.Ok
 import akka.http.scaladsl.model.headers.{Authorization, HttpCredentials}
 import akka.http.scaladsl.model.{HttpHeader, HttpMethod, HttpMethods, HttpRequest, Uri}
@@ -8,7 +9,7 @@ import akka.http.scaladsl.server.Directives
 import akka.http.scaladsl.util.FastFuture
 import junit.framework.Assert.fail
 import org.tomitribe.auth.signatures.{Algorithm, Signature, Signatures, Signer, Verifier}
-import run.cosy.http.auth.HttpSig.{KeyAgent, PublicKeyAlgo}
+import run.cosy.http.auth.HttpSig.KeyAgent
 import run.cosy.ldp.testUtils.TmpDir
 
 import java.nio.file.Path
@@ -55,9 +56,10 @@ class TestHttpSigRSAFn extends munit.FunSuite {
 	import org.tomitribe.auth.signatures.SigningAlgorithm
 	import java.util
 
-	val method = "POST"
-	val uri = "/foo?param=value&pet=dog"
-	val headers = Map[String,String](
+	val method = HttpMethods.POST
+	val uri = Uri("/foo?param=value&pet=dog")
+
+	val headers = Seq(
 		"Host" -> "example.org",
 		"Date" -> "Thu, 05 Jan 2012 21:31:40 GMT",
 		"Content-Type" -> "application/json",
@@ -65,18 +67,24 @@ class TestHttpSigRSAFn extends munit.FunSuite {
 		"Accept" -> "*/*",
 		"Content-Length" -> "18"
 	)
+	def akkaHeaders(h: Seq[(String, String)]): Seq[HttpHeader] = h.map((h, v) =>
+		HttpHeader.parse(h,v) match {
+			case Ok(h,e) => h
+			case ParsingResult.Error(e) => fail("error in our headers:"+e)
+		})
 	
 	test("rsaSha512") {
 		import org.tomitribe.auth.signatures.Algorithm
+		val sha516rsaSig = JW2JCA.getSignerAndVerifier("SHA512withRSA").get
 		val algorithm = Algorithm.RSA_SHA512
 
-		assertSignature(algorithm, "IItboA8OJgL8WSAnJa8MND04s9j7d" + 
+		assertSignature(sha516rsaSig, algorithm, "IItboA8OJgL8WSAnJa8MND04s9j7d" +
 			"B6IJIBVpOGJph8Tmkc5yUAYjvO/UQUKytRBe5CSv2GLfTAmE" + 
 			"7SuRgGGMwdQZubNJqRCiVPKBpuA47lXrKgC/wB0QAMkPHI6c" + 
 			"PllBZRixmjZuU9mIbuLjXMHR+v/DZwOHT9k8x0ILUq2rKE=", 
 			List("date"))
 
-		assertSignature(algorithm, "ggIa4bcI7q377gNoQ7qVYxTA4pEOl" +
+		assertSignature(sha516rsaSig, algorithm, "ggIa4bcI7q377gNoQ7qVYxTA4pEOl" +
 			"xlFzRtiQV0SdPam4sK58SFO9EtzE0P1zVTymTnsSRChmFU2p" + 
 			"n+R9VzkAhQ+yEbTqzu+mgHc4P1L5IeeXQ5aAmGENfkRbm2vd" + 
 			"OZzP5j6ruB+SJXIlhnaum2lsuyytSS0m/GkWvFJVZFu33M=", 
@@ -84,43 +92,58 @@ class TestHttpSigRSAFn extends munit.FunSuite {
 	}
 	
 	test("rsaSha512 using httpSigAuthN") {
-		testReq(Algorithm.RSA_SHA512, List("date"))
-		testReq(Algorithm.RSA_SHA512, List("host", "date"))
-		testReq(Algorithm.RSA_SHA512, List("(request-target)", "host", "date"))
+		val sha516rsaSig = JW2JCA.getSignerAndVerifier("SHA512withRSA").get
+		val algorithm = Algorithm.RSA_SHA512
+		testReq(sha516rsaSig, algorithm, List("date"))
+		testReq(sha516rsaSig, algorithm, List("host", "date"))
+		testReq(sha516rsaSig, algorithm, List("(request-target)", "host", "date"))
 	}
 
-	private def testReq(algorithm: Algorithm, sign: List[String]) = {
+	private def testReq(jcaSig: java.security.Signature, algorithm: Algorithm, sign: List[String]) = {
 		import scala.concurrent.duration.*
 		val sig = new Signature(s"<$uri>", SigningAlgorithm.HS2019, algorithm, null, null, sign.asJava)
 		val signer = new Signer(privateKey,sig)
-		val signature = signer.sign("post",s"<$uri>",headers.asJava)
+		val signature = signer.sign(method.value,s"<$uri>",headers.toMap.asJava)
 		
 		val authorization = "Authorization" -> signature.toString
-		val hdr: List[HttpHeader] = (authorization::headers.iterator.to(List)).map { (k, v) =>
-			HttpHeader.parse(k, v) match
-				case Ok(hdr, List()) => hdr
-				case e => fail("error:" + e)
-		}
-		val req: HttpRequest = HttpRequest(HttpMethods.POST, Uri(uri), hdr)
+
+		val req: HttpRequest = HttpRequest(method, uri, akkaHeaders(headers :+ authorization))
 
 		given ec: ExecutionContext = ExecutionContext.global
 
-		val f: Future[server.Directives.AuthenticationResult[HttpSig.Agent]] = HttpSig.httpSigAuthN(req){ url =>
-			assertEquals(url, Uri(uri))
-			FastFuture.successful(HttpSig.PublicKeyAlgo(publicKey,algorithm))
+		val f: Future[server.Directives.AuthenticationResult[HttpSig.Agent]] =
+			HttpSig.httpSigAuthN(req){ url =>
+				assertEquals(url, uri)
+				FastFuture.successful(SigningData(publicKey,jcaSig))
 		}(req.header[Authorization].map(_.credentials))
-		assertEquals(Await.result(f, 1.second), Right(KeyAgent(Uri(uri))))
+		assertEquals(Await.result(f, 1.second), Right(KeyAgent(uri)))
 	}
 
 	@throws[Exception]
-	def assertSignature(algorithm: Algorithm, expected: String, sign: List[String]): Unit = {
-		val sig = new Signature("some-key-1", SigningAlgorithm.HS2019, algorithm, null, null, sign.asJava)
+	def assertSignature(jcaSig: java.security.Signature, algorithm: Algorithm, expected: String, sign: List[String]): Unit = {
+		val sig = new Signature("some-key-1", SigningAlgorithm.HS2019, algorithm , null, null, sign.asJava)
 		val signer = new Signer(privateKey,sig)
-		val signed: Signature = signer.sign(method, uri, headers.asJava)
+		val signed: Signature = signer.sign(method.value, uri.toString(), headers.toMap.asJava)
 		assertEquals(expected, signed.getSignature)
+
+		//verify with Tomitribe
 		val verifier = new Verifier(publicKey, signed)
-		assert(verifier.verify(method,uri,headers.asJava))
-		//Signature.fromString(signed.getSignature)
+		assert(verifier.verify(method.value,uri.toString(),headers.toMap.asJava))
+
+		//verify with HttpSig
+		given ec: ExecutionContext = ExecutionContext.global
+		val hst = HttpSig(sign)
+		assert(hst.isCompleted)
+		assert(hst.value.isDefined)
+		val sigdata = SigningData(publicKey,jcaSig)
+		val res = hst.flatMap { httpsig =>
+			FastFuture(httpsig.createSigningString(HttpRequest(method, uri, akkaHeaders(headers))).map { ss =>
+				val b = sigdata.verifySignature(ss)(expected)
+				assert(b)
+				b
+			})
+		}
+		res.onComplete(x => assert(x.isSuccess))
 	}
 	
 	

@@ -9,7 +9,8 @@ import akka.http.scaladsl.Http
 import akka.http.scaladsl.Http.ServerBinding
 import akka.http.scaladsl.model.Uri.Path.{Empty, Segment, Slash}
 import akka.http.scaladsl.model
-import akka.http.scaladsl.model.{HttpResponse, Uri}
+import akka.http.scaladsl.model.headers
+import akka.http.scaladsl.model.{HttpMethods, HttpRequest, HttpResponse, Uri}
 import akka.http.scaladsl.server.Directives
 import akka.http.scaladsl.server.Directives.{complete, extract, extractRequestContext}
 import akka.http.scaladsl.server.{RequestContext, Route, RouteResult}
@@ -18,9 +19,9 @@ import akka.http.scaladsl.util.FastFuture
 import akka.util.Timeout
 import cats.data.NonEmptyList
 import com.typesafe.config.{Config, ConfigFactory}
-import run.cosy.http.RDFMediaTypes
-import run.cosy.http.auth.HttpSig
-import run.cosy.http.auth.HttpSig.{Agent, PublicKeyAlgo}
+import run.cosy.http.{IResponse, RDFMediaTypes, RdfParser}
+import run.cosy.http.auth.{HttpSig, SigningData}
+import run.cosy.http.auth.HttpSig.{Agent, Anonymous, WebServerAgent}
 import run.cosy.ldp.ResourceRegistry
 import run.cosy.ldp.fs.BasicContainer
 
@@ -59,7 +60,7 @@ object Solid {
 				.newServerAt(uri.authority.host.address(), uri.authority.port)
 				.withSettings(serverSettings)
 				.bind(solid.routeLdp())
-        
+
 			ctx.pipeToSelf(serverBinding) {
 				case Success(binding) =>
 					val shutdown = CoordinatedShutdown(system)
@@ -73,11 +74,11 @@ object Solid {
 					}
 					shutdown.addTask(CoordinatedShutdown.PhaseServiceStop, "http-shutdown") { () =>
 						Http().shutdownAllConnectionPools().map(_ => Done)
-					}	
+					}
 					Started(binding)
 				case Failure(ex) => StartFailed(ex)
 			}
-			
+
 			def running(binding: ServerBinding): Behavior[Run] =
 				Behaviors.receiveMessagePartial[Run] {
 					case Stop =>
@@ -116,18 +117,18 @@ object Solid {
 	case class StartFailed(cause: Throwable) extends Run
 	case class Started(binding: ServerBinding) extends Run
 	case object Stop extends Run
-	
+
 }
 
 /**
- * The object from from which the solid server is called. 
+ * The object from from which the solid server is called.
  * This object also keeps track of actorRef -> path mappings
  * so that the requests can go directly to the right actor for a resource
- * once all the intermediate containers have been set up. 
+ * once all the intermediate containers have been set up.
  *
  * We want to have intermediate containers so that some can be setup
- * to read from the file system, others from git or CVS, others yet from 
- * a DB, ... A container actor would know what behavior it implements by 
+ * to read from the file system, others from git or CVS, others yet from
+ * a DB, ... A container actor would know what behavior it implements by
  * looking at some config file in that directory.
  *
  * This is an object that can be called simultaneously by any number
@@ -137,9 +138,9 @@ object Solid {
  * @param baseUri of the container, eg: https://alice.example/solid/
  */
 class Solid(
-	baseUri: Uri, 
-	path: Path, 
-	registry: ResourceRegistry, 
+	baseUri: Uri,
+	path: Path,
+	registry: ResourceRegistry,
 	rootRef: ActorRef[BasicContainer.Cmd]
 )(using sys: ActorSystem[_]) {
 
@@ -150,18 +151,32 @@ class Solid(
 	import scala.jdk.CollectionConverters.*
 	given timeout: Scheduler = sys.scheduler
 	given scheduler: Timeout = Timeout(5.second)
-	
-	def fetch(uri: Uri): Future[PublicKeyAlgo] = ???
+
+	def fetchKeyId(keyIdUrl: Uri)(reqc: RequestContext): Future[SigningData] = {
+		import RouteResult.{Complete,Rejected}
+		import run.cosy.RDF.{given,_}
+		given ec: ExecutionContext = reqc.executionContext
+		val req = RdfParser.rdfRequest(keyIdUrl)
+		if keyIdUrl.isRelative then  //we get the resource locally
+			routeLdp(WebServerAgent)(reqc.withRequest(req)).flatMap{
+				case Complete(response) => RdfParser.unmarshalToRDF(response,keyIdUrl).map{ (g: IResponse[Rdf#Graph]) =>
+					 ???
+				}
+				case Rejected(rejections) => ???
+			}
+		else // we get it from the web
+			???
+	}
 
 	lazy val securedRoute: Route = extractRequestContext { (reqc: RequestContext) =>
-		HttpSig.httpSignature(reqc)(fetch).optional.tapply { 
+		HttpSig.httpSignature(reqc)(fetchKeyId(_)(reqc)).optional.tapply {
 			case Tuple1(Some(agent)) => routeLdp(agent)
 			case Tuple1(None) => routeLdp()	
 		}
 	}
 
 	
-	def routeLdp(agent: Agent = new Agent{}): Route = (reqc: RequestContext) => {
+	def routeLdp(agent: Agent = new Anonymous()): Route = (reqc: RequestContext) => {
 		val path = reqc.request.uri.path
 		import reqc.{given}
 		reqc.log.info("routing req " + reqc.request.uri)

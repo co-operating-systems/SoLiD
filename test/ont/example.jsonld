@@ -1,9 +1,9 @@
 {
 "@context": [
-    "http://localhost:8080/ont/security",
+    "https://w3id.org/security/v1",
     { "ex": "http://example.org/vocab#" }
   ],
-  "id": "did:example:123#WqzaOweASs78whhl_YvCEvj1nd89IycryVlmZMefcjU",
+  "id": "#hs2019",
   "type": "EcdsaSecp256k1VerificationKey2019",
   "controller": "did:example:123",
   "publicKeyJwk": {
