@@ -1,8 +1,4 @@
 import sbt._
-import dotty.tools.sbtplugin.DottyPlugin.autoImport._
-import sbt.Keys.scalaVersion
-
-import scala.collection.immutable
 
 /**
  * https://www.scala-sbt.org/1.x/docs/Organizing-Build.html
@@ -20,11 +16,11 @@ object Dependencies {
 
 	//
 	// scala 2.13 libs
-
 	//
+
 	/**
 	 * Akka Http Core
-	 *
+	 * Apache 2 License
 	 * @see https://akka.io
 	 * @see https://repo1.maven.org/maven2/com/typesafe/akka
 	 * */
@@ -33,7 +29,12 @@ object Dependencies {
 		"com.typesafe.akka" %% "akka-http" % AkkaHttpVersion,
 		"com.typesafe.akka" %% "akka-slf4j" % AkkaVersion)
 
+	/**
+	 * Apache 2 License
+	 * @see https://doc.akka.io/docs/alpakka/current/
+	 */
 	val alpakka = "com.lightbend.akka" %% "akka-stream-alpakka-file" % alpakkaVersion
+
 
 	val akkaTest = NeedsDottyCompat("com.typesafe.akka" %% "akka-actor-testkit-typed" % AkkaVersion % Test,
 		"com.typesafe.akka" %% "akka-stream-testkit" % AkkaVersion % Test,
@@ -44,11 +45,13 @@ object Dependencies {
 	 * There is a 3.0.0 version of scalaz out, but until banana-rdf compiles to 3.0.0 we
 	 * need to use the 2.13 scala version
 	 * @see https://scalaz.github.io/7/
+	 * @see [[https://github.com/scalaz/scalaz/blob/master/LICENSE.txt License]]
 	 */
 	val scalaz  = "org.scalaz" %% "scalaz-core" %  scalazVersion
 
 	/**
 	 * banana-rdf is still using 2.13
+	 * [[https://github.com/banana-rdf/banana-rdf/blob/series/0.8.x/LICENSE.md W3C License]]
 	 * @see https://github.com/banana-rdf/banana-rdf
 	 */
 	val banana = NeedsDottyCompat(
@@ -63,13 +66,14 @@ object Dependencies {
 	//
 
 	/**
-	 * [[https://www.scalatest.org/install home page]]
+	 * [[https://www.scalatest.org/install home page]] published under Apache 2 License
 	 * @see [[https://mvnrepository.com/artifact/org.scalatest/scalatest maven]]
 	 * */
 	val scalatest = "org.scalatest" %% "scalatest" % "3.2.7" % Test
 
 	/**
-	 * @see https://scalameta.org/munit/docs/getting-started.html
+	 * Apache 2 License
+	 * @see [[https://scalameta.org/munit/docs/getting-started.html Getting Started]]
 	 * @see https://mvnrepository.com/artifact/org.scalameta/munit
 	 */
 	val munit = "org.scalameta" %% "munit" % "0.7.23" % Test
@@ -80,12 +84,14 @@ object Dependencies {
 	//
 
 	/**
+	 * Apache 2 License
 	 * Tomitribe HTTP Signatures implementation in Java
 	 * @see https://github.com/tomitribe/http-signatures-java
 	 */
 	val tomitribeHttpSig = "org.tomitribe" % "tomitribe-http-signatures" % "1.7"
 
 	/**
+	 * Apache 2 License
 	 * Titanium JSON-LD 1.1 parser. Only Java parser able to parse security vocab files it seems.
 	 * Should be integrated into banana-rdf.
 	 * @see https://github.com/filip26/titanium-json-ld
@@ -93,18 +99,21 @@ object Dependencies {
 	val titaniumJSonLD = "com.apicatalog" % "titanium-json-ld" % "1.0.0"
 
 	/**
+	 * Apache 2 License
 	 * @see  https://connect2id.com/products/nimbus-jose-jwt/examples/jwk-conversion
 	 */
 	val nimbusDS = "com.nimbusds" % "nimbus-jose-jwt" % "9.7"
 
 	/**
+	 * License [[http://logback.qos.ch/license.html EPL v1.0 and the LGPL 2.1]]
 	 *  used by Akka logging
 	 *  @see http://logback.qos.ch/download.html
 	 */
 	val logback = "ch.qos.logback" % "logback-classic" % "1.2.3"
 
 	/**
-	 * @see https://mvnrepository.com/artifact/commons-codec/commons-codec
+	 * Apache 2.0
+	 * @see [[https://mvnrepository.com/artifact/commons-codec/commons-codec Apache Commons Codec]]
 	 */
 	val apacheCommonsCodec = "commons-codec" % "commons-codec" % "1.15"
 
