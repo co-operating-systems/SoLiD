@@ -1,22 +1,21 @@
 package run.cosy.http.auth
 
-import akka.http.scaladsl.model.{HttpEntity, HttpRequest, Uri}
-import akka.http.scaladsl.model.headers.{Authorization, GenericHttpCredentials, HttpChallenge, HttpCredentials,
-	OAuth2BearerToken, `Content-Type`}
+import akka.http.scaladsl.model.{HttpEntity, HttpHeader, HttpRequest, Uri}
+import akka.http.scaladsl.model.headers.{Authorization, GenericHttpCredentials, HttpChallenge, HttpCredentials, OAuth2BearerToken, `Content-Type`}
 import akka.http.scaladsl.server.AuthenticationFailedRejection.{CredentialsMissing, CredentialsRejected}
 import akka.http.scaladsl.server.{AuthenticationFailedRejection, Directive1, RequestContext}
-import akka.http.scaladsl.server.Directives.{AsyncAuthenticator, AuthenticationResult,
-	authenticateOrRejectWithChallenge, extract, extractCredentials, extractRequestContext, provide}
+import akka.http.scaladsl.server.Directives.{AsyncAuthenticator, AuthenticationResult, authenticateOrRejectWithChallenge, extract, extractCredentials, extractRequestContext, provide}
 import akka.http.scaladsl.server.directives.{AuthenticationDirective, AuthenticationResult, Credentials}
 import akka.http.scaladsl.server.directives.BasicDirectives.extractExecutionContext
 import akka.http.scaladsl.server.directives.RouteDirectives.reject
 import akka.http.scaladsl.util.FastFuture
 import com.nimbusds.jose.jwk.JWK
 import org.tomitribe.auth.signatures.{Algorithm, Signatures, Signer, SigningAlgorithm, Verifier}
+import run.cosy.http.headers.SigVerificationData
 import run.cosy.http.{InvalidCreatedFieldException, InvalidExpiresFieldException}
 
 import java.net.URI
-import java.security.{PublicKey, Signature}
+import java.security.{PrivateKey, PublicKey, Signature}
 import java.time.{Clock, Instant}
 import java.util
 import java.util.{Locale, Map}
@@ -59,11 +58,11 @@ object HttpSig {
 	 *
 	 *  use with [[akka.http.scaladsl.server.directives.SecurityDirectives.authenticateOrRejectWithChallenge]]
  	 */
-	def httpSignature(reqc: RequestContext)(fetch: Uri => Future[SigningData]): AuthenticationDirective[Agent] =
+	def httpSignature(reqc: RequestContext)(fetch: Uri => Future[SigVerificationData]): AuthenticationDirective[Agent] =
 		authenticateOrRejectWithChallenge(httpSigAuthN(reqc.request)(fetch)(using reqc.executionContext))
 
 	def httpSigAuthN(req: HttpRequest)(
-		fetch: Uri => Future[SigningData])(
+		fetch: Uri => Future[SigVerificationData])(
 		using ec: ExecutionContext
 	): Option[HttpCredentials] => Future[AuthenticationResult[Agent]] =
 		case Some(c@GenericHttpCredentials("Signature",_,params)) =>
@@ -121,6 +120,7 @@ class HttpSig(
 	signatureExpiration: scala.Option[Long]
 ) {
 	import scala.jdk.CollectionConverters.SeqHasAsJava
+
 	def createSigningString(req: HttpRequest): Try[String] =
 		val headersMap = req.headers.foldRight(new java.util.HashMap[String,String]()){
 			(h,m) => m.put(h.name(),h.value); m}

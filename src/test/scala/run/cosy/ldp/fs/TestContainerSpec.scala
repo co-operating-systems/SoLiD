@@ -23,13 +23,15 @@ import akka.actor.ActorSystem
 import akka.http.scaladsl.model.StatusCodes.{Created, OK}
 import akka.http.scaladsl.model.headers.{Accept, Location}
 import akka.stream.{ActorMaterializer, Materializer}
-import cats.data.NonEmptyList
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 import akka.http.scaladsl.model.Uri
+import run.cosy.http.auth.HttpSig.WebServerAgent
 import run.cosy.ldp.testUtils.TmpDir
+
 import java.nio.file
+import scalaz.NonEmptyList
 
 
 class TestContainerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers {
@@ -59,6 +61,7 @@ class TestContainerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers
 			//create Hello
 			import _root_.run.cosy.http.Encoding.{given, *}
 			rootActr ! BasicContainer.Do(
+				WebServerAgent,
 				HttpRequest(
 					POST,
 					rootUri.withPath(Uri.Path.SingleSlash),
@@ -74,8 +77,9 @@ class TestContainerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers
 		}
 		{
 			// Read Hello
-			rootActr ! BasicContainer.Route(
-				NonEmptyList("Hello", Nil),
+			rootActr ! BasicContainer.RouteMsg(
+				NonEmptyList("Hello"),
+				WebServerAgent,
 				HttpRequest(
 					GET,
 					rootUri.withPath(Uri.Path / "Hello"),

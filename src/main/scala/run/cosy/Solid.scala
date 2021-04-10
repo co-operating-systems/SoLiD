@@ -17,14 +17,14 @@ import akka.http.scaladsl.server.{RequestContext, Route, RouteResult}
 import akka.http.scaladsl.settings.ServerSettings
 import akka.http.scaladsl.util.FastFuture
 import akka.util.Timeout
-import cats.data.NonEmptyList
 import com.typesafe.config.{Config, ConfigFactory}
 import org.w3.banana.PointedGraph
 import run.cosy.http.{IResponse, RDFMediaTypes, RdfParser}
-import run.cosy.http.auth.{HttpSig, SigningData}
 import run.cosy.http.auth.HttpSig.{Agent, Anonymous, WebServerAgent}
 import run.cosy.ldp.ResourceRegistry
-import run.cosy.ldp.fs.BasicContainer
+import run.cosy.ldp.fs.{BasicContainer => BC}
+import scalaz.NonEmptyList
+import scalaz.NonEmptyList.nel
 
 import java.io.{File, FileInputStream}
 import java.nio.file.{Files, Path}
@@ -49,7 +49,7 @@ object Solid {
 			given system: ActorSystem[Nothing] = ctx.system
 			given reg : ResourceRegistry = ResourceRegistry(ctx.system)
 			val withoutSlash = uri.withPath(uri.path.reverse.dropChars(1).reverse)
-			val rootRef: ActorRef[BasicContainer.Cmd] = ctx.spawn(BasicContainer(withoutSlash, fpath), "solid")
+			val rootRef: ActorRef[BC.Cmd] = ctx.spawn(BasicContainer(withoutSlash, fpath), "solid")
 			val registry = ResourceRegistry(system)
 			val solid = new Solid(uri, fpath, registry, rootRef)
 			given timeout: Scheduler = system.scheduler
@@ -143,10 +143,12 @@ class Solid(
 	baseUri: Uri,
 	path: Path,
 	registry: ResourceRegistry,
-	rootRef: ActorRef[BasicContainer.Cmd]
+	rootRef: ActorRef[BC.Cmd]
 )(using sys: ActorSystem[_]) {
 
 	import akka.actor.typed.scaladsl.AskPattern.{Askable, schedulerFromActorSystem}
+	import run.cosy.http.auth.HttpSig
+	import run.cosy.http.headers.SigVerificationData
 	import akka.pattern.ask
 
 	import scala.concurrent.duration.*
@@ -154,7 +156,7 @@ class Solid(
 	given timeout: Scheduler = sys.scheduler
 	given scheduler: Timeout = Timeout(5.second)
 
-	def fetchKeyId(keyIdUrl: Uri)(reqc: RequestContext): Future[SigningData] = {
+	def fetchKeyId(keyIdUrl: Uri)(reqc: RequestContext): Future[SigVerificationData] = {
 		import RouteResult.{Complete,Rejected}
 		import run.cosy.RDF.{given,_}, run.cosy.RDF.ops.{given,*}
 		given ec: ExecutionContext = reqc.executionContext
@@ -187,13 +189,12 @@ class Solid(
 		val path = reqc.request.uri.path
 		import reqc.{given}
 		reqc.log.info("routing req " + reqc.request.uri)
-		val (remaining, actor): (List[String], ActorRef[BasicContainer.Cmd]) = registry.getActorRef(path)
+		val (remaining, actor): (List[String], ActorRef[BC.Cmd]) = registry.getActorRef(path)
 			.getOrElse((List[String](), rootRef))
 
-		def cmdFn(ref: ActorRef[HttpResponse]): BasicContainer.Cmd = remaining match {
-			case Nil => BasicContainer.Do(reqc.request, ref)
-			case head :: tail => BasicContainer.Route(NonEmptyList(head, tail), reqc.request, ref)
-		}
+		def cmdFn(ref: ActorRef[HttpResponse]): BC.Cmd = remaining match
+			case Nil => BC.WannaDo(agent, reqc.request, ref)
+			case head :: tail => BC.RouteMsg(NonEmptyList.fromSeq(head,tail.toSeq), agent, reqc.request, ref)
 
 		actor.ask[HttpResponse](cmdFn).map(RouteResult.Complete(_))
 	}

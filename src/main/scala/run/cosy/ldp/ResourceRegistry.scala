@@ -3,7 +3,6 @@ package run.cosy.ldp
 import akka.actor.typed._
 import akka.actor.typed.scaladsl.Behaviors
 import akka.http.scaladsl.model.{HttpRequest, Uri}
-import cats.data.NonEmptyList
 import run.cosy.ldp.fs.BasicContainer
 
 import java.nio.file.Path

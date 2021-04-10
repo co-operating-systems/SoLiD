@@ -15,7 +15,7 @@ import scala.util.control.NoStackTrace
 import RDF.{given,*}, ops.given
 
 object JWKExtractor {
-	//import io.circe.*, io.circe.parser.*
+
 	import jwk.{JWK, JWKMatcher, KeyUse, OctetSequenceKey}
 	import recordBinder.*
 
@@ -65,5 +65,6 @@ object JWkey {
 		import org.tomitribe.auth.signatures.Algorithm
 		scala.util.Try(jwk.JWK.parse(jwkStr))
 	}
+	
 }
 

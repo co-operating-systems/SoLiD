@@ -7,8 +7,6 @@ import scala.concurrent.{ExecutionContext, Future}
 import org.w3.banana._
 import org.w3.banana.syntax._
 import org.w3.banana.jena.Jena
-import Jena._
-import Jena.ops._
 import akka.http.scaladsl.util.FastFuture
 import akka.stream.Materializer
 import org.apache.jena.graph.Graph
@@ -18,6 +16,8 @@ import scala.util.{Failure, Try}
 import scala.util.control.NoStackTrace
 
 object RdfParser {
+	import run.cosy.RDF.{given,*}
+	import ops.{given,*}
 	import RDFMediaTypes.*
 
 	/** @param base: the URI at which the document was resolved */

@@ -4,8 +4,8 @@ import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, Behavior, PostStop, PreRestart}
 import akka.http.scaladsl.model
 import akka.http.scaladsl.model.StatusCodes.{Created, Gone, InternalServerError, MovedPermanently, NotFound, NotImplemented, OK, PermanentRedirect}
-import akka.http.scaladsl.model.headers.{Link, LinkParam, LinkValue, `Content-Type`}
-import akka.http.scaladsl.model.{HttpRequest, HttpResponse, Uri}
+import akka.http.scaladsl.model.headers.{HttpChallenge, Link, LinkParam, LinkValue, `Content-Type`, `WWW-Authenticate`}
+import akka.http.scaladsl.model.{HttpRequest, HttpResponse, StatusCodes, Uri}
 import akka.http.scaladsl.server.ContentNegotiator.Alternative
 import akka.http.scaladsl.server.ContentNegotiator.Alternative.ContentType
 import akka.http.scaladsl.server.{RequestContext, RouteResult}
@@ -13,7 +13,6 @@ import akka.stream.scaladsl.{Concat, FileIO, Merge, RunnableGraph, Source}
 import akka.stream.{ActorMaterializer, IOResult, Materializer}
 import akka.util.ByteString
 import akka.{Done, NotUsed}
-import cats.data.NonEmptyList
 import run.cosy.http.Headers.Slug
 import run.cosy.ldp
 
@@ -28,9 +27,12 @@ import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success, Try, Using}
 import akka.event.slf4j.Slf4jLogger
 import run.cosy.http.RDFMediaTypes
+import run.cosy.http.auth.HttpSig.{Agent, KeyAgent, WebServerAgent}
 import run.cosy.ldp.fs.BasicContainer
-import run.cosy.ldp.fs.BasicContainer.Cmd
+import run.cosy.ldp.fs.BasicContainer.{Cmd, Route, WannaDo}
 import run.cosy.ldp.ResourceRegistry
+import scalaz.NonEmptyList.nel
+import scalaz.{ICons, INil, NonEmptyList}
 
 import java.nio.file.{Files, Path}
 import scala.collection.immutable.HashMap
@@ -179,41 +181,56 @@ object BasicContainer {
 
 	sealed trait Cmd
 
-	sealed trait ReqCmd extends Cmd {
+	//trait for a Cmd that is to be acted upon
+	sealed trait Act extends Cmd
+	sealed trait Route extends Cmd
+	sealed trait Info extends Cmd
+
+	sealed trait ReqMsg {
 		val req: HttpRequest
+		val from: Agent
 		val replyTo: ActorRef[HttpResponse]
 	}
 
-	/** @param path the path to the final resource */
-	final case class Route(
+	/**
+	 * @param path the path to the final resource */
+	final case class RouteMsg(
 		path: NonEmptyList[String],
+		from: Agent,
 		req: HttpRequest,
 		replyTo: ActorRef[HttpResponse]
-	)(using val mat: Materializer, val ec: ExecutionContext) extends ReqCmd {
+	)(using val mat: Materializer, val ec: ExecutionContext) extends ReqMsg with Route {
 		def name: String = path.head
 
 		// check that path is not empty before calling  (anti-pattern)
-		def next: ReqCmd = path match
-			case NonEmptyList(head, Nil) => Do(req, replyTo)
-			case NonEmptyList(head, tail) => Route(NonEmptyList(tail.head, tail.tail), req, replyTo)
+		def next: ReqMsg with Route = path match
+			case NonEmptyList(_, INil()) => WannaDo(from, req, replyTo)
+			case NonEmptyList(_, ICons(h,tail)) => RouteMsg(nel(h,tail), from, req, replyTo)
 	}
 
-	/** a command to be executed on the resource on which it arrives */
+	/** a command to be executed on the resource on which it arrives, after being authorized */
 	final case class Do(
+		from: Agent,
 		req: HttpRequest,
 		replyTo: ActorRef[HttpResponse]
-	)(using val mat: Materializer, val ec: ExecutionContext) extends ReqCmd
+	)(using val mat: Materializer, val ec: ExecutionContext) extends ReqMsg with Act
+
+	/** message has arrived, but still needs to be authorized */
+	final case class WannaDo(
+		 from: Agent,
+		 req: HttpRequest,
+		 replyTo: ActorRef[HttpResponse]
+	)(using val mat: Materializer, val ec: ExecutionContext) extends ReqMsg with Route
 
 	/** Message for initial creation of container, after creation of dir. HttpRequest in Do.  */
 	case class CreateContainer(
 		name: Path, cmd: Do
 	)(using
 	  val mat: Materializer, val ec: ExecutionContext
-	) extends Cmd
+	) extends Act
 
 	// responses from child to parent
-	case class ChildTerminated(name: String) extends Cmd
-
+	case class ChildTerminated(name: String) extends Info
 
 }
 
@@ -279,7 +296,7 @@ class BasicContainer private(
 	reg: ResourceRegistry
 ) {
 
-	import BasicContainer.{Do, ReqCmd, Route, linkToName, santiseSlug}
+	import BasicContainer.{Do, ReqMsg, RouteMsg, linkToName, santiseSlug}
 	import akka.http.scaladsl.model.HttpCharsets.`UTF-8`
 	import akka.http.scaladsl.model.MediaTypes.{`text/plain`, `text/x-java-source`}
 	import akka.http.scaladsl.model.headers.{Link, LinkParams, LinkValue, Location, `Content-Type`}
@@ -360,10 +377,22 @@ class BasicContainer private(
 		import java.time.Instant
 		import scala.annotation.tailrec
 
+		def Authorize(wd: WannaDo): Behavior[Cmd] =
+			context.log.info(s"in Authorize for $dirPath. received $wd")
+			if List(WebServerAgent,KeyAgent("/user/key#")).exists(_ == wd.from) then
+				import wd.{given,*}
+				context.context.self ! Do(from,req,replyTo)
+			else wd.replyTo ! HttpResponse(StatusCodes.Unauthorized,
+				Seq(`WWW-Authenticate`(HttpChallenge("Signature",s"$dirPath")))
+			)
+			Behaviors.same
+
+
 		lazy val start: Behavior[Cmd] = {
 			Behaviors.receiveMessage[Cmd] { (msg: Cmd) =>
 				import BasicContainer.{ChildTerminated, CreateContainer}
 				msg match
+					case wd: WannaDo => Authorize(wd)
 					case act: Do => run(act)
 					case create: CreateContainer =>
 						// we don't do much at this point. For later
@@ -374,7 +403,7 @@ class BasicContainer private(
 							)
 						)
 						Behaviors.same
-					case routeMsg: Route => routeHttpReq(routeMsg)
+					case routeMsg: RouteMsg => routeHttpReq(routeMsg)
 					case ChildTerminated(name) =>
 						reg.removePath(containerUrl.path / name)
 						new Dir(contains - name,counters).start
@@ -564,23 +593,23 @@ class BasicContainer private(
 //		}
 
 		protected
-		def routeHttpReq(msg: Route): Behavior[Cmd] = {
+		def routeHttpReq(msg: RouteMsg): Behavior[Cmd] = {
 			context.log.info(
 				s"received ${msg.req.method.value} <${msg.req.uri}> in ${dirPath.toFile.getAbsolutePath} in container with uri $containerUrl")
 
 			msg.next match
-				case doit: Do =>
+				case doit: WannaDo =>
 					if doit.req.uri.path.endsWithSlash then
 						forwardToContainer(msg.name, msg)
 					else forwardMsgToResourceActor(msg.name, doit)
-				case route: Route => forwardToContainer(msg.name, route)
+				case route: RouteMsg => forwardToContainer(msg.name, route)
 		}
 
 		//todo: do we need a name cleanup happen? Perhaps we don't need that for containers?
-		//  but getRef can also return a RRef... So `cat.jpg` 
+		//  but getRef can also return a RRef... So `cat.jpg`
 		//  here would return a `cat.jpg` RRef rather than `cat` or a `CRef`
 		//  this indicates that the path name must be set after checking the attributes!
-		def forwardToContainer(name: String, msg: ReqCmd): Behavior[Cmd] = {
+		def forwardToContainer(name: String, msg: ReqMsg with Route): Behavior[Cmd] = {
 			if name.contains('.') then
 				msg.replyTo ! HttpResponse(NotFound,
 					entity=HttpEntity("This Solid server serves no resources with a '.' char in path segments (except for the last `file` segment)."))
@@ -591,11 +620,11 @@ class BasicContainer private(
 					case CRef(att, actor) => actor ! msg
 					case RRef(att, actor) => // there is no container, so redirect to resource
 						msg match
-						case Do(req, replyTo) =>  //we're at the path end, so we can redirect
+						case WannaDo(agent, req, replyTo) =>  //we're at the path end, so we can redirect
 							val uri = msg.req.uri
 							val redirectTo = uri.withPath(uri.path.reverse.tail.reverse)
 							replyTo ! HttpResponse(MovedPermanently, Seq(Location(redirectTo)))
-						case Route(path, req, replyTo) => // the path passes through a file, so it must end here
+						case RouteMsg(path, agent, req, replyTo) => // the path passes through a file, so it must end here
 							replyTo ! HttpResponse(NotFound, Seq(), s"Resource with URI ${req.uri} does not exist")
 					case _: Archived => msg.replyTo ! HttpResponse(Gone)
 					case _: OtherAtt => msg.replyTo ! HttpResponse(NotFound)
@@ -615,7 +644,7 @@ class BasicContainer private(
 		 * @return A new Behavior, updated if a new child actor is created.
 		 */
 		protected
-		def forwardMsgToResourceActor(name: String, msg: Do): Behavior[Cmd] =
+		def forwardMsgToResourceActor(name: String, msg: WannaDo): Behavior[Cmd] =
 			val dotLessName = actorNameFor(name)
 			getRef(dotLessName) match
 			case Some(x,dir) =>

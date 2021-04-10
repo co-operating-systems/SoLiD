@@ -1,7 +1,7 @@
 package run.cosy.http
 
 import akka.actor.typed.ActorSystem
-import akka.http.scaladsl.model.MediaTypes
+import akka.http.scaladsl.model.{MediaRange, MediaTypes}
 import akka.http.scaladsl.model.MediaTypes.extensionMap
 import akka.http.scaladsl.settings.ParserSettings
 
@@ -51,7 +51,7 @@ object RDFMediaTypes {
 	 *	see [[https://www.w3.org/TR/turtle/ RDF 1.1 Turtle]]
 	 * has URI:  http://www.w3.org/ns/formats/Turtle 
 	 */
-	val `text/turtle` = MediaType.customWithFixedCharset(
+	val `text/turtle`: MediaType.WithFixedCharset = MediaType.customWithFixedCharset(
 		"text","turtle",`UTF-8`,
 		fileExtensions = List("ttl")
 	)
@@ -115,7 +115,7 @@ object RDFMediaTypes {
 	def rdfData: Seq[MediaType] = Seq(`application/rdf+xml`, `application/n-triples`, `application/n-quads`,
 		`text/n-quads`,`text/turtle`,`application/trig`, `text/n3`,`application/ld+json`
 	)
-
+	
 	def all: Seq[MediaType] = Seq(`application/rdf+xml`, `application/n-triples`, `application/n-quads`,
 		`text/n-quads`,`text/turtle`,`application/trig`, `text/n3`,`application/ld+json`,
 		`application/sparql-results+json`, `application/sparql-results+xml`, `application/trix`

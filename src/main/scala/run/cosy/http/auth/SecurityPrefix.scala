@@ -7,7 +7,7 @@ object SecurityPrefix {
 }
 
 
-class SecurityPrefix[Rdf <: RDF](ops: RDFOps[Rdf]) extends PrefixBuilder("security", "https://w3id.org/security/v1")(ops) {
+class SecurityPrefix[Rdf <: RDF](ops: RDFOps[Rdf]) extends PrefixBuilder("security", "https://w3id.org/security/v1#")(ops) {
 	val controller = apply("controller")
 	val publicKeyJwk = apply("publicKeyJwk")
 }

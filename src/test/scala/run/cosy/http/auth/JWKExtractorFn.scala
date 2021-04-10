@@ -27,10 +27,13 @@ class JWKExtractorFn extends munit.FunSuite {
 
 
 	test("RDF to JWT") {
-		val jwtLit: Rdf#Literal = Literal(jwtRsa, rdf.JSON)
+		import org.w3.banana._
+		import org.w3.banana.syntax._
+
 		val keyIdStr = "http://alice.example/key#i"
 		val keyId = URI(keyIdStr)
-		val jwtPg = keyId -- security.publicKeyJwk ->-  jwtLit
+		val jsLiteral: Rdf#Node = Literal(jwtRsa, rdf.JSON)
+		val jwtPg = keyId -- security.publicKeyJwk ->- PointedGraph(jsLiteral,Graph.empty)
 		val expectedGraph =
 			Graph(
 				Triple(keyId, security.publicKeyJwk, Literal(jwtRsa, rdf.JSON)),

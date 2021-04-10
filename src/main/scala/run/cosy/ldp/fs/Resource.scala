@@ -6,12 +6,13 @@ import akka.http.scaladsl.model.MediaTypes.{`text/plain`, `text/x-java-source`}
 import akka.http.scaladsl.model.ContentTypes.`text/plain(UTF-8)`
 import akka.http.scaladsl.model.HttpCharsets.`UTF-8`
 import akka.http.scaladsl.model._
-import akka.http.scaladsl.model.headers.{Accept, Location, `Content-Type`}
+import akka.http.scaladsl.model.headers.{Accept, HttpChallenge, Location, `Content-Type`, `WWW-Authenticate`}
 import akka.stream.IOResult
 import akka.stream.scaladsl.FileIO
 import run.cosy.http.FileExtensions
+import run.cosy.http.auth.HttpSig.{KeyAgent, WebServerAgent}
 import run.cosy.ldp.ResourceRegistry
-import run.cosy.ldp.fs.BasicContainer.{Cmd, Do, Route}
+import run.cosy.ldp.fs.BasicContainer.{Cmd, Do, ReqMsg, RouteMsg, WannaDo}
 import run.cosy.ldp.fs.Resource.connegNamesFor
 
 import java.nio.file.{Files, Path => FPath}
@@ -49,7 +50,7 @@ object Resource {
 
 	//log.info(s"created LDPR($ldprUri,$path)")
 
-	type AcceptMsg = Do | CreateResource
+	type AcceptMsg = WannaDo | Do | CreateResource
 	
 	/** send POST to child actor so that it can place the content body
 	 * into the file `linkTo`
@@ -127,18 +128,27 @@ class Resource(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg]) {
 		def GoneBehavior: Behaviors.Receive[AcceptMsg] =
 			Behaviors.receiveMessage[AcceptMsg] { (msg: AcceptMsg) =>
 				msg match
-				case Do(req, replyTo) => replyTo ! HttpResponse(Gone)
-				case CreateResource(_, Do(req, replyTo)) =>
+				case cmd: ReqMsg => cmd.replyTo ! HttpResponse(Gone)
+				case CreateResource(_, Do(_, req, replyTo)) =>
 					log.warn(s"received Create on resource <$uri> at <$linkPath> that has been deleted! " + 
 						s"Message should not reach this point.")
 					replyTo ! HttpResponse(InternalServerError,entity=HttpEntity("please contact admin"))
 				Behaviors.same
 			}
 
+		def Authorize(wd: WannaDo) =
+			if List(WebServerAgent,KeyAgent("/user/key#")).exists(_ == wd.from) then
+				import wd.{given, *}
+				context.self ! Do(from,req,replyTo)
+			else wd.replyTo ! HttpResponse(StatusCodes.Unauthorized,
+				Seq(`WWW-Authenticate`(HttpChallenge("Signature",s"$uri")))
+			)
+			Behaviors.same
+
 		def NormalBehavior: Behaviors.Receive[AcceptMsg] =
 			Behaviors.receiveMessage[AcceptMsg] { (msg: AcceptMsg) =>
 				msg match
-				case cr @ CreateResource(linkToPath, Do(req, replyTo)) =>
+				case cr @ CreateResource(linkToPath, Do(_, req, replyTo)) =>
 					log.info(
 						s"""received POST request with headers ${req.headers} and CT=${req.entity.contentType} 
 							|Saving to: $linkToPath""".stripMargin)
@@ -162,7 +172,9 @@ class Resource(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg]) {
 					//todo: here we should change the behavior to one where requests are stashed until the upload
 					// is finished, or where they are returned with a "please wait" response...
 					Behaviors.same
-				case Do(req, replyTo) =>
+				case wd: WannaDo => Authorize(wd)
+					Behaviors.same
+				case Do(_, req, replyTo) =>
 					req.method match
 						case GET => Get(req, replyTo)
 						case DELETE => Delete(req, replyTo) 

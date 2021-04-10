@@ -4,7 +4,7 @@ import munit._
 import munit.Location._
 import akka.http.scaladsl.model.Uri
 
-class SolitTest extends munit.FunSuite {
+class SolidTest extends munit.FunSuite {
 	val root : Uri = Uri("https://ted.example")
 	val u1 : Uri = Uri("https://ted.example/foo/bar")
 

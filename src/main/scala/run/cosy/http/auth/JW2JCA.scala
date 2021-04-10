@@ -6,9 +6,10 @@ import com.nimbusds.jose.crypto.impl.RSASSA
 import com.nimbusds.jose.jwk.{AsymmetricJWK, ECKey, JWK, RSAKey}
 import com.nimbusds.jose.util.Base64
 import run.cosy.http.CryptoException
+import run.cosy.http.headers.SigVerificationData
 
 import java.nio.charset.{Charset, StandardCharsets}
-import java.security.{Provider, PublicKey, Signature}
+import java.security.{PrivateKey, Provider, PublicKey, Signature}
 import scala.util.{Failure, Try}
 
 /**
@@ -17,12 +18,12 @@ import scala.util.{Failure, Try}
 object JW2JCA {
 	val signerFactory = new DefaultJWSSignerFactory()
 
-	def jw2rca(jwk: JWK): Try[SigningData] = {
+	def jw2rca(jwk: JWK): Try[SigVerificationData] = {
 		jwk.getAlgorithm match {
 		case jwsAlgo: JWSAlgorithm =>
 			Try(RSASSA.getSignerAndVerifier(jwsAlgo,signerFactory.getJCAContext.getProvider)).flatMap{sig=>
 				jwk match
-				case k: AsymmetricJWK => Try(SigningData(k.toPublicKey, sig))
+				case k: AsymmetricJWK => Try(SigVerificationData(k.toPublicKey, sig))
 				case _ => Failure(CryptoException("we only use assymetric keys!"))
 			}
 		case alg => Failure(CryptoException("We do not support algorithm "+alg))
@@ -40,13 +41,5 @@ object JW2JCA {
 		}
 
 
-}
-
-case class SigningData(pubKey: PublicKey, sig: Signature) {
-	//this is not thread safe!
-	def verifySignature(signingStr: String) = (base64SigStr: String) =>
-		sig.initVerify(pubKey)
-		sig.update(signingStr.getBytes(StandardCharsets.US_ASCII))
-		sig.verify(new Base64(base64SigStr).decode())
 }
 

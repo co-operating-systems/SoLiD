@@ -8,10 +8,12 @@ import akka.http.scaladsl.server
 import akka.http.scaladsl.server.Directives
 import akka.http.scaladsl.util.FastFuture
 import junit.framework.Assert.fail
-import org.tomitribe.auth.signatures.{Algorithm, Signature, Signatures, Signer, Verifier}
+import org.tomitribe.auth.signatures.{Algorithm, PEM, Signature, Signatures, Signer, Verifier}
 import run.cosy.http.auth.HttpSig.KeyAgent
+import run.cosy.http.headers.SigVerificationData
 import run.cosy.ldp.testUtils.TmpDir
 
+import java.io.ByteArrayInputStream
 import java.nio.file.Path
 import java.security.PublicKey
 import java.security.spec.AlgorithmParameterSpec
@@ -20,8 +22,7 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.jdk.CollectionConverters._
 import scala.util.Success
 
-class TestHttpSigRSAFn extends munit.FunSuite {
-
+object TestHttpSigRSAFn {
 	val  privateKeyPem: String = "-----BEGIN RSA PRIVATE KEY-----\n" +
 		"MIICXgIBAAKBgQDCFENGw33yGihy92pDjZQhl0C36rPJj+CvfSC8+q28hxA161QF\n" +
 		"NUd13wuCTUcq0Qd2qsBe/2hFyc2DCJJg0h1L78+6Z4UMR7EOcpfdUE9Hf3m/hs+F\n" +
@@ -37,7 +38,7 @@ class TestHttpSigRSAFn extends munit.FunSuite {
 		"G6aFKaqQfOXKCyWoUiVknQJAXrlgySFci/2ueKlIE1QqIiLSZ8V8OlpFLRnb1pzI\n" +
 		"7U1yQXnTAEFYM560yJlzUpOb1V4cScGd365tiSMvxLOvTA==\n" +
 		"-----END RSA PRIVATE KEY-----\n";
-	
+
 	val publicKeyPem = "-----BEGIN PUBLIC KEY-----\n" +
 		"MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDCFENGw33yGihy92pDjZQhl0C3\n" +
 		"6rPJj+CvfSC8+q28hxA161QFNUd13wuCTUcq0Qd2qsBe/2hFyc2DCJJg0h1L78+6\n" +
@@ -45,11 +46,16 @@ class TestHttpSigRSAFn extends munit.FunSuite {
 		"oYi+1hqp1fIekaxsyQIDAQAB\n" +
 		"-----END PUBLIC KEY-----\n";
 
-	import org.tomitribe.auth.signatures.PEM
-	import java.io.ByteArrayInputStream
-
 	lazy val privateKey = PEM.readPrivateKey(new ByteArrayInputStream(privateKeyPem.getBytes))
 	lazy val publicKey: PublicKey = PEM.readPublicKey(new ByteArrayInputStream(publicKeyPem.getBytes))
+
+}
+
+class TestHttpSigRSAFn extends munit.FunSuite {
+	import TestHttpSigRSAFn._
+
+	import java.io.ByteArrayInputStream
+
 
 //	val signature: Signature  = new Signature("key-alias", "hmac-sha256", null, "(request-target)");
 
@@ -85,12 +91,12 @@ class TestHttpSigRSAFn extends munit.FunSuite {
 			List("date"))
 
 		assertSignature(sha516rsaSig, algorithm, "ggIa4bcI7q377gNoQ7qVYxTA4pEOl" +
-			"xlFzRtiQV0SdPam4sK58SFO9EtzE0P1zVTymTnsSRChmFU2p" + 
-			"n+R9VzkAhQ+yEbTqzu+mgHc4P1L5IeeXQ5aAmGENfkRbm2vd" + 
-			"OZzP5j6ruB+SJXIlhnaum2lsuyytSS0m/GkWvFJVZFu33M=", 
+			"xlFzRtiQV0SdPam4sK58SFO9EtzE0P1zVTymTnsSRChmFU2p" +
+			"n+R9VzkAhQ+yEbTqzu+mgHc4P1L5IeeXQ5aAmGENfkRbm2vd" +
+			"OZzP5j6ruB+SJXIlhnaum2lsuyytSS0m/GkWvFJVZFu33M=",
 			List("(request-target)", "host", "date"))
 	}
-	
+
 	test("rsaSha512 using httpSigAuthN") {
 		val sha516rsaSig = JW2JCA.getSignerAndVerifier("SHA512withRSA").get
 		val algorithm = Algorithm.RSA_SHA512
@@ -105,22 +111,28 @@ class TestHttpSigRSAFn extends munit.FunSuite {
 		val signer = new Signer(privateKey,sig)
 		val signature = signer.sign(method.value,s"<$uri>",headers.toMap.asJava)
 		
-		val authorization = "Authorization" -> signature.toString
 
-		val req: HttpRequest = HttpRequest(method, uri, akkaHeaders(headers :+ authorization))
+		def verify(sig: String) =
+			val authorization = "Authorization" -> sig
+			val req: HttpRequest = HttpRequest(method, uri, akkaHeaders(headers :+ authorization))
+			given ec: ExecutionContext = ExecutionContext.global
+			val f: Future[server.Directives.AuthenticationResult[HttpSig.Agent]] =
+				HttpSig.httpSigAuthN(req){ url =>
+					assertEquals(url, uri)
+					FastFuture.successful(SigVerificationData(publicKey,jcaSig))
+			}(req.header[Authorization].map(_.credentials))
+			assertEquals(Await.result(f, 1.second), Right(KeyAgent(uri)))
 
-		given ec: ExecutionContext = ExecutionContext.global
-
-		val f: Future[server.Directives.AuthenticationResult[HttpSig.Agent]] =
-			HttpSig.httpSigAuthN(req){ url =>
-				assertEquals(url, uri)
-				FastFuture.successful(SigningData(publicKey,jcaSig))
-		}(req.header[Authorization].map(_.credentials))
-		assertEquals(Await.result(f, 1.second), Right(KeyAgent(uri)))
+		verify(signature.toString)
 	}
 
 	@throws[Exception]
-	def assertSignature(jcaSig: java.security.Signature, algorithm: Algorithm, expected: String, sign: List[String]): Unit = {
+	def assertSignature(
+		jcaSig: java.security.Signature,
+		algorithm: Algorithm,
+		expected: String,
+		sign: List[String]
+	): Unit = {
 		val sig = new Signature("some-key-1", SigningAlgorithm.HS2019, algorithm , null, null, sign.asJava)
 		val signer = new Signer(privateKey,sig)
 		val signed: Signature = signer.sign(method.value, uri.toString(), headers.toMap.asJava)
@@ -129,22 +141,5 @@ class TestHttpSigRSAFn extends munit.FunSuite {
 		//verify with Tomitribe
 		val verifier = new Verifier(publicKey, signed)
 		assert(verifier.verify(method.value,uri.toString(),headers.toMap.asJava))
-
-		//verify with HttpSig
-		given ec: ExecutionContext = ExecutionContext.global
-		val hst = HttpSig(sign)
-		assert(hst.isCompleted)
-		assert(hst.value.isDefined)
-		val sigdata = SigningData(publicKey,jcaSig)
-		val res = hst.flatMap { httpsig =>
-			FastFuture(httpsig.createSigningString(HttpRequest(method, uri, akkaHeaders(headers))).map { ss =>
-				val b = sigdata.verifySignature(ss)(expected)
-				assert(b)
-				b
-			})
-		}
-		res.onComplete(x => assert(x.isSuccess))
 	}
-	
-	
 }

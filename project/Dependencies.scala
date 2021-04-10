@@ -1,4 +1,4 @@
-import sbt._
+import sbt.{CrossVersion, _}
 
 /**
  * https://www.scala-sbt.org/1.x/docs/Organizing-Build.html
@@ -10,9 +10,8 @@ object Dependencies {
 	val circeVersion = "0.14.0-M4"
 	val bananaVersion = "0.9.0-SNAPSHOT"
 	val alpakkaVersion = "2.0.2"
+	val bouncyVersion = "1.68"
 
-	type NeedsDottyCompat = List[ModuleID]
-	val NeedsDottyCompat = List
 
 	//
 	// scala 2.13 libs
@@ -24,21 +23,21 @@ object Dependencies {
 	 * @see https://akka.io
 	 * @see https://repo1.maven.org/maven2/com/typesafe/akka
 	 * */
-	val akka = NeedsDottyCompat("com.typesafe.akka" %% "akka-actor-typed" % AkkaVersion,
-		"com.typesafe.akka" %% "akka-stream" % AkkaVersion,
-		"com.typesafe.akka" %% "akka-http" % AkkaHttpVersion,
-		"com.typesafe.akka" %% "akka-slf4j" % AkkaVersion)
+	val akka = Seq("com.typesafe.akka" % "akka-actor-typed" % AkkaVersion,
+		"com.typesafe.akka" % "akka-stream" % AkkaVersion,
+		"com.typesafe.akka" % "akka-http" % AkkaHttpVersion,
+		"com.typesafe.akka" % "akka-slf4j" % AkkaVersion)
 
 	/**
 	 * Apache 2 License
 	 * @see https://doc.akka.io/docs/alpakka/current/
 	 */
-	val alpakka = "com.lightbend.akka" %% "akka-stream-alpakka-file" % alpakkaVersion
+	val alpakka = "com.lightbend.akka" % "akka-stream-alpakka-file" % alpakkaVersion
 
 
-	val akkaTest = NeedsDottyCompat("com.typesafe.akka" %% "akka-actor-testkit-typed" % AkkaVersion % Test,
-		"com.typesafe.akka" %% "akka-stream-testkit" % AkkaVersion % Test,
-		"com.typesafe.akka" %% "akka-http-testkit" % AkkaHttpVersion % Test)
+	val akkaTest = Seq("com.typesafe.akka" % "akka-actor-testkit-typed" % AkkaVersion % Test,
+		"com.typesafe.akka" % "akka-stream-testkit" % AkkaVersion % Test,
+		"com.typesafe.akka" % "akka-http-testkit" % AkkaHttpVersion % Test)
 
 	/**
 	 * banana-rdf uses Scalaz so we won't use cats right now.
@@ -47,19 +46,28 @@ object Dependencies {
 	 * @see https://scalaz.github.io/7/
 	 * @see [[https://github.com/scalaz/scalaz/blob/master/LICENSE.txt License]]
 	 */
-	val scalaz  = "org.scalaz" %% "scalaz-core" %  scalazVersion
+	val scalaz  = "org.scalaz" % "scalaz-core" %  scalazVersion
 
 	/**
 	 * banana-rdf is still using 2.13
 	 * [[https://github.com/banana-rdf/banana-rdf/blob/series/0.8.x/LICENSE.md W3C License]]
 	 * @see https://github.com/banana-rdf/banana-rdf
 	 */
-	val banana = NeedsDottyCompat(
-		"net.bblfish.rdf" %% "banana-rdf" % bananaVersion,
-		"net.bblfish.rdf" %% "banana-jena" % bananaVersion
+	val banana = Seq(
+		"net.bblfish.rdf" % "banana-rdf" % bananaVersion,
+		"net.bblfish.rdf" % "banana-jena" % bananaVersion
 	)
 
-	def dottyCompatLibs: NeedsDottyCompat = akka ++ akkaTest ++ banana ++ Seq(scalaz, alpakka)
+	/**
+	 *  MIT License
+	 *  @see https://github.com/typelevel/cats-parse
+	 */
+	val catsParse =  "org.typelevel" %% "cats-parse" % "0.3.2"
+
+
+	def dottyCompatLibs = (Seq(scalaz, alpakka, catsParse) ++ akka ++ akkaTest ++ banana).map( o =>
+		o cross CrossVersion.for3Use2_13
+	)
 
 	//
 	// Scala 3 libs
@@ -79,6 +87,7 @@ object Dependencies {
 	val munit = "org.scalameta" %% "munit" % "0.7.23" % Test
 
 	val scala3Libs = Seq(scalatest, munit)
+	
 	//
 	// Java Libs
 	//
@@ -102,7 +111,20 @@ object Dependencies {
 	 * Apache 2 License
 	 * @see  https://connect2id.com/products/nimbus-jose-jwt/examples/jwk-conversion
 	 */
-	val nimbusDS = "com.nimbusds" % "nimbus-jose-jwt" % "9.7"
+	val nimbusDS = "com.nimbusds" % "nimbus-jose-jwt" % "9.8"
+
+	/**
+	 * BouncyCastle (for parsing PEM encoded objects at present in test)
+	 * MIT style License
+	 * @see https://www.bouncycastle.org/latest_releases.html
+	 * @see https://repo1.maven.org/maven2/org/bouncycastle/bcprov-jdk15to18/
+	 */
+	val bouncy = Seq(
+		//"org.bouncycastle" % "bcprov-jdk15to18" % bouncyVersion,
+		//"org.bouncycastle" % "bctls-jdk15to18" % bouncyVersion,
+		"org.bouncycastle" % "bcpkix-jdk15to18" % bouncyVersion % Test
+	)
+	
 
 	/**
 	 * License [[http://logback.qos.ch/license.html EPL v1.0 and the LGPL 2.1]]
@@ -117,7 +139,7 @@ object Dependencies {
 	 */
 	val apacheCommonsCodec = "commons-codec" % "commons-codec" % "1.15"
 
-	val javaLibs = Seq(tomitribeHttpSig, titaniumJSonLD, nimbusDS, logback, apacheCommonsCodec)
+	val javaLibs = Seq(tomitribeHttpSig, titaniumJSonLD, nimbusDS, logback, apacheCommonsCodec)++bouncy
 
 
 }

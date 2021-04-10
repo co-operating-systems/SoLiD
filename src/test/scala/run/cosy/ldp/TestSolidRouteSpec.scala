@@ -11,12 +11,14 @@ import akka.http.scaladsl.testkit.ScalatestRouteTest
 import akka.util.Timeout
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
-import run.cosy.{Solid, SolitTest}
+import run.cosy.{Solid, SolidTest}
 import run.cosy.http.Headers.Slug
 import run.cosy.ldp.fs.BasicContainer
 
 import java.nio.file.{Files, Path}
 import concurrent.duration.DurationInt
+import run.cosy.http.auth.HttpSig
+import run.cosy.http.auth.HttpSig.WebServerAgent
 import run.cosy.ldp.testUtils.TmpDir.{createDir, deleteDir}
 
 class TestSolidRouteSpec extends AnyWordSpec with Matchers with ScalatestRouteTest {
@@ -50,10 +52,10 @@ class TestSolidRouteSpec extends AnyWordSpec with Matchers with ScalatestRouteTe
 		} finally testKit.shutdownTestKit()
 	end withServer
 			
-	class SolidTestPost(solid: Solid):
+	class SolidTestPost(solid: Solid, agent: HttpSig.Agent=new HttpSig.Anonymous):
 		def newResource(baseDir: Uri, slug: Slug, text: String): Uri =
 			Req.Post(baseDir, HttpEntity(text)).withHeaders(slug) ~>
-				solid.routeLdp() ~> check {
+				solid.routeLdp(agent) ~> check {
 				status shouldEqual StatusCodes.Created
 				val loc: Location = header[Location].get 
 				loc.uri
@@ -61,14 +63,14 @@ class TestSolidRouteSpec extends AnyWordSpec with Matchers with ScalatestRouteTe
 			
 		def newContainer(baseDir: Uri, slug: Slug): Uri =
 			Req.Post(baseDir).withHeaders(slug,BasicContainer.ldpcLinkHeaders) ~>
-				solid.routeLdp() ~> check {
+				solid.routeLdp(agent) ~> check {
 					status shouldEqual StatusCodes.Created
 					header[Location].get.uri
 			}
 		
 		def read(url: Uri, text: String, times: Int = 1) =
 			for (_ <- 1 to times)
-				Req.Get(url).withHeaders(Accept(MediaRanges.`*/*`)) ~> solid.routeLdp() ~> check {
+				Req.Get(url).withHeaders(Accept(MediaRanges.`*/*`)) ~> solid.routeLdp(agent) ~> check {
 					responseAs[String] shouldEqual text
 				}
 		
@@ -78,30 +80,14 @@ class TestSolidRouteSpec extends AnyWordSpec with Matchers with ScalatestRouteTe
 		val rootC =  toUri("/")
 
 		"started for the first time" in withServer { solid =>
-			val test = new SolidTestPost(solid)
 			info(s"we GET <$rootUri>")
-			Req.Get(rootUri).withHeaders(Accept(MediaRanges.`*/*`)) ~> solid.routeLdp() ~> check {
+			Req.Get(rootUri).withHeaders(Accept(MediaRanges.`*/*`)) ~> solid.routeLdp(WebServerAgent) ~> check {
 				status shouldEqual StatusCodes.MovedPermanently
 				header[Location].get shouldEqual Location(rootC)
 			}
-
-			info(s"GET <$rootUri> without Authentication header - should give the same result")
-			Req.Get(rootUri).withHeaders(Accept(MediaRanges.`*/*`)) ~> solid.securedRoute ~> check {
-				status shouldEqual StatusCodes.MovedPermanently
-				header[Location].get shouldEqual Location(rootC)
-			} 
 			
-			info(s"GET <$rootUri> but supply broken authentication headers")
-			Req.Get(rootUri).withHeaders(
-				Accept(MediaRanges.`*/*`),
-				Authorization(GenericHttpCredentials("Signature",Map())) //we send a broken credential
-			) ~> solid.securedRoute ~> check {
-				rejection should matchPattern {
-					case AuthenticationFailedRejection(CredentialsRejected,HttpChallenge("Signature",_,_)) =>
-				}
+			val test = new SolidTestPost(solid,WebServerAgent)
 
-			}
-			
 			info("create a new resource </Hello> with POST and read it 3 times")
 			val newUri = test.newResource(rootC, Slug("Hello"), "Hello World!")
 			newUri equals toUri("/Hello")
@@ -115,7 +101,7 @@ class TestSolidRouteSpec extends AnyWordSpec with Matchers with ScalatestRouteTe
 			}
 
 			info("Delete the first created resource </Hello>")
-			Req.Delete(newUri) ~> solid.routeLdp() ~> check {
+			Req.Delete(newUri) ~> solid.routeLdp(WebServerAgent) ~> check {
 				status shouldEqual StatusCodes.NoContent
 			}
 
@@ -151,7 +137,7 @@ class TestSolidRouteSpec extends AnyWordSpec with Matchers with ScalatestRouteTe
 		}
 
 		"restarted" in withServer { solid =>
-			val test = new SolidTestPost(solid)
+			val test = new SolidTestPost(solid, WebServerAgent)
 
 			info("create more resources with the same Slug(Hello) and GET them too - the deleted one is not overwritten")
 			for (count <- (6 to 9).toList) {
