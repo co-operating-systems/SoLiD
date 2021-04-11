@@ -71,17 +71,17 @@ object Rfc8941 {
 
 	val sfItem: P[PItem] = (bareItem ~ parameters).map(PItem.apply)
 
-	val innerList: P[InnerList] = {
+	val innerList: P[IList] = {
 		import R5234.sp
 		(((P.char('(') ~ sp.rep0) *> ((sfItem ~ (sp *> sfItem).rep0 <* sp.rep0).?) <* P.char(')')) ~ parameters)
 			.map {
-				case (Some(pi, lpi), params) => InnerList(pi :: lpi, params)
-				case (None, params) => InnerList(List(), params)
+				case (Some(pi, lpi), params) => IList(pi :: lpi, params)
+				case (None, params) => IList(List(), params)
 			}
 	}
 	val listMember: P[Parameterized] = (sfItem | innerList)
 
-	val sfList: P[SFList] =
+	val sfList: P[SfList] =
 		(listMember ~ ((ows *> P.char(',') *> ows).void.with1 *> listMember).rep0).map((p, lp) => p :: lp)
 
 	val memberValue: P[Parameterized] = (sfItem | innerList)
@@ -110,13 +110,10 @@ object Rfc8941Types {
 	 * Note: Unit was added. It Allows us to have empty Item parameters. todo: check it's ok.
 	 */
 	type Item = Number | String | Token | ArraySeq[Byte] | Boolean | Unit
-	type Key = String
+	type Key = String  //todo: Would an Opaque type help here?
 	type Parameter = (Key, Item)
 	type Parameters = ListMap[Key, Item]
-	type SFList = List[Parameterized]
-
-	// todo: use List[Digit] instead of String, to avoid loosing type info
-	trait Number
+	type SfList = List[Parameterized]
 
 	/**
 	 * dict-member    = member-key ( parameters / ( "=" member-value ))
@@ -128,17 +125,23 @@ object Rfc8941Types {
 	final
 	case class DictMember(key: Key, values: Parameterized)
 
+	/** Parameterized Item */
 	final
 	case class PItem(item: Item, params: Parameters = ListMap()) extends Parameterized
 
+	/** Inner List */
 	final
-	case class InnerList(items: List[PItem], params: Parameters = ListMap()) extends Parameterized
+	case class IList(items: List[PItem], params: Parameters = ListMap()) extends Parameterized
 
+	trait Number
+
+	// todo: could one use List[Digit] instead of String, to avoid loosing type info?
 	final case class IntStr(integer: String) extends Number
 
 	//Implementations may want to parse these decimals differently. We avoid loosing information
 	//by not interpreting at this point. There may be a way not to loose that, but it would require
-	//quite a lot of digging into the BigDecimal class' functioning.
+	//quite a lot of digging into the BigDecimal class' functioning. That would also tie this layer
+	//to that choice, unless such choices could be passed `using` ops.
 	final case class DecStr(integer: String, dec: String) extends Number
 
 	final case class Token(t: String)

@@ -143,7 +143,7 @@ class Rfc8941_Test extends munit.FunSuite {
 			)
 		}
 
-		import run.cosy.http.headers.Rfc8941Types.{InnerList=>IL,DictMember}
+		import run.cosy.http.headers.Rfc8941Types.{IList=>IL,DictMember}
 
 		//
 		//Inner Lists
