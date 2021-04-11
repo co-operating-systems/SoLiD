@@ -1,21 +1,13 @@
 package run.cosy.http.headers
 
-import cats.parse.Rfc5234.wsp
-import run.cosy.http.headers.ParamItems.Key
-import run.cosy.http.headers.Rfc8941.parameters
-
 import java.util.Base64
-import scala.collection.immutable.ArraySeq
-//import run.cosy.http.headers.Rfc7230.obsText
-
-import scala.collection.immutable.ListMap
+import scala.collection.immutable.{ArraySeq,ListMap}
 
 
 object Rfc8941 {
 
-	import ParamItems._
-	import cats.parse.Rfc5234
-	import Rfc5234._
+	import Rfc8941Types._
+	import cats.parse.{Rfc5234=>R5234}
 	import cats.parse.Numbers.{nonNegativeIntString, signedIntString}
 	import cats.parse.{Parser => P, Parser0 => P0}
 	import run.cosy.http.headers.Rfc7230.ows
@@ -26,14 +18,13 @@ object Rfc8941 {
 	private val `.`   = P.char('.')
 	private val bs    = '\\'
 	private val minus = P.char('-')
+	val `\\`: P[Unit] = P.char(bs)
 
-	val backslash: P[Unit] = P.char(bs)
-	val boolean: P[Boolean] = Rfc5234.bit.map(_ == '1')
-
+	val boolean: P[Boolean] = R5234.bit.map(_ == '1')
 	val sfBoolean = (`?` *> boolean)
-	val sfInteger: P[IntStr] = (minus.?.with1 ~ digit.rep(1, 15)).string.map(IntStr.apply)
-	val decFraction: P[String] = digit.rep(1, 3).string
-	val signedDecIntegral: P[String] = (minus.?.with1 ~ digit.rep(1, 12)).map { case (min, i) =>
+	val sfInteger: P[IntStr] = (minus.?.with1 ~ R5234.digit.rep(1, 15)).string.map(IntStr.apply)
+	val decFraction: P[String] = R5234.digit.rep(1, 3).string
+	val signedDecIntegral: P[String] = (minus.?.with1 ~ R5234.digit.rep(1, 12)).map { case (min, i) =>
 		min.map(_ => "-").getOrElse("") + i.toList.mkString
 	}
 	val sfDecimal: P[DecStr] =
@@ -54,38 +45,40 @@ object Rfc8941 {
 		P.charIn(' ', 0x21.toChar)
 			.orElse(P.charIn(0x23.toChar to 0x5b.toChar))
 			.orElse(P.charIn(0x5d.toChar to 0x7e.toChar))
-	val escaped: P[Char] = (backslash *> (P.charIn(bs, '"')))
-	val sfString: P[String] = (dquote *> (unescaped | escaped).rep0 <* dquote).map(_.mkString)
-	val sfToken: P[Token] = ((Rfc5234.alpha | P.charIn('*')) ~ (Rfc7230.tchar | P.charIn(':', '/')).rep0)
+	val escaped: P[Char] = (`\\` *> (P.charIn(bs, '"')))
+	val sfString: P[String] = (R5234.dquote *> (unescaped | escaped).rep0 <* R5234.dquote).map(_.mkString)
+	val sfToken: P[Token] = ((R5234.alpha | P.charIn('*')) ~ (Rfc7230.tchar | P.charIn(':', '/')).rep0)
 		.map { (c, lc) => Token((c :: lc).mkString) }
-	val base64: P[Char] = (alpha | digit | P.charIn('+', bs, '='))
+	val base64: P[Char] = (R5234.alpha | R5234.digit | P.charIn('+', bs, '='))
 	val sfBinary: P[ArraySeq[Byte]] = (`:` *> base64.rep0 <* `:`).map { chars =>
 		ArraySeq.unsafeWrapArray(Base64.getDecoder.decode(chars.mkString))
 	}
 	val bareItem: P[Item] = P.oneOf(sfNumber :: sfString :: sfToken :: sfBinary :: sfBoolean :: Nil)
-
 	val lcalpha: P[Char] = P.charIn(0x61.toChar to 0x7a.toChar) | P.charIn('a' to 'z')
-	val Key: P[Key] = ((lcalpha | `*`) ~ (lcalpha | digit | P.charIn('_', '-', '.', '*')).rep0)
+
+	val Key: P[Key] = ((lcalpha | `*`) ~ (lcalpha | R5234.digit | P.charIn('_', '-', '.', '*')).rep0)
 		.map((c, lc) => (c :: lc).mkString)
 
-	val parameter: P[ParamItems.Parameter] =
+	val parameter: P[Rfc8941Types.Parameter] =
 		(Key ~ (P.char('=') *> bareItem).orElse(P.unit))
 
 	//note: parameters always returns an answer (the empty list) as everything can have parameters
 	//todo: this is not exeactly how it is specified, so check here if something goes wrong
-	val parameters: P0[ParamItems.Parameters] =
-	(P.char(';') *> ows *> parameter).rep0.orElse(P.pure(List())).map { list =>
-		ListMap.from[Key, Item](list.iterator)
-	}
+	val parameters: P0[Rfc8941Types.Parameters] =
+		(P.char(';') *> ows *> parameter).rep0.orElse(P.pure(List())).map { list =>
+			ListMap.from[Key, Item](list.iterator)
+		}
 
 	val sfItem: P[PItem] = (bareItem ~ parameters).map(PItem.apply)
 
-	val innerList: P[InnerList] =
+	val innerList: P[InnerList] = {
+		import R5234.sp
 		(((P.char('(') ~ sp.rep0) *> ((sfItem ~ (sp *> sfItem).rep0 <* sp.rep0).?) <* P.char(')')) ~ parameters)
 			.map {
 				case (Some(pi, lpi), params) => InnerList(pi :: lpi, params)
 				case (None, params) => InnerList(List(), params)
 			}
+	}
 	val listMember: P[Parameterized] = (sfItem | innerList)
 
 	val sfList: P[SFList] =
@@ -106,9 +99,10 @@ object Rfc8941 {
 	)
 }
 
-sealed abstract class Parameterized //would need to use http4s to get Renderable
 
-object ParamItems {
+object Rfc8941Types {
+	sealed abstract class Parameterized //would need to use http4s to get Renderable
+
 	/**
 	 * see [[https://www.rfc-editor.org/rfc/rfc8941.html#section-3.3 §3.3 Items]] of RFC8941.
 	 * Note: all the Java implementations can take values that can be larger or a lot larger.
@@ -142,7 +136,6 @@ object ParamItems {
 
 	final case class IntStr(integer: String) extends Number
 
-	//todo: same as Above
 	//Implementations may want to parse these decimals differently. We avoid loosing information
 	//by not interpreting at this point. There may be a way not to loose that, but it would require
 	//quite a lot of digging into the BigDecimal class' functioning.

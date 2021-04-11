@@ -23,7 +23,7 @@ class Rfc8941_Test extends munit.FunSuite {
 		//
 		// test Items
 		//
-		import run.cosy.http.headers.ParamItems.{DecStr, IntStr, PItem, Token}
+		import run.cosy.http.headers.Rfc8941Types.{DecStr, IntStr, PItem, Token}
 
 		test("test sfBoolean") {
 			assertEquals(sfBoolean.parse("?0"), R(false))
@@ -92,7 +92,7 @@ class Rfc8941_Test extends munit.FunSuite {
 		}
 	}
 	{
-		import run.cosy.http.headers.ParamItems.{PItem => PI, Token => Tk, DecStr => Dec, IntStr}
+		import run.cosy.http.headers.Rfc8941Types.{PItem => PI, Token => Tk, DecStr => Dec, IntStr}
 
 		//
 		// test Lists
@@ -143,7 +143,7 @@ class Rfc8941_Test extends munit.FunSuite {
 			)
 		}
 
-		import run.cosy.http.headers.ParamItems.{InnerList=>IL,DictMember}
+		import run.cosy.http.headers.Rfc8941Types.{InnerList=>IL,DictMember}
 
 		//
 		//Inner Lists
