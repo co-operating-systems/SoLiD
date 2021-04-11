@@ -2,13 +2,16 @@ package run.cosy.http.headers
 
 import akka.http.scaladsl.model.HttpHeader
 import akka.http.scaladsl.model.headers.{CustomHeader, RawHeader}
+import cats.parse.Parser
 import com.nimbusds.jose.util.Base64
-import run.cosy.http.{BetterCustomHeader, BetterCustomHeaderCompanion}
+import run.cosy.http.headers.Rfc8941
+import run.cosy.http.{BetterCustomHeader, BetterCustomHeaderCompanion, HTTPHeaderParseException}
 
 import java.nio.charset.StandardCharsets
 import java.security.{PrivateKey, PublicKey, Signature}
 import java.time.Instant
-import scala.util.Try
+import scala.collection.immutable.ListMap
+import scala.util.{Failure, Success, Try}
 
 
 
@@ -30,9 +33,22 @@ final case class `Signature-Input`(sig: SigHeaders, keyId: String, created: Opti
 
 object `Signature-Input` extends BetterCustomHeaderCompanion[`Signature-Input`] :
 	override val name = "Signature-Input"
+	type SigInput = (SigHeaders, String, Option[Instant], Option[Instant])
 
 	//override try to generalise later
-	def parse(value: String): Try[(SigHeaders, String, Option[Instant], Option[Instant])] =
+	def parse(value: String): Try[ListMap[Rfc8941.Key,SigInput]] =
+		val sig: Try[ListMap[Rfc8941.Key, Rfc8941.Parameterized]] =
+			Rfc8941.sfDictionary.parseAll(value) match {
+				case Left(e) => Failure(HTTPHeaderParseException(e,value))
+				case Right(lm) =>
+					val x = lm.map{ case (key,p) =>
+
+						???
+					}
+					??? //Success(x)
+			}
+		//		.left.map((e: Parser.Error) => HTTPHeaderParseException(e,value)).toTry
+		
 		???
 
 	//can an unapply return a Try in scala3

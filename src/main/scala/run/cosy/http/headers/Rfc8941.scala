@@ -6,7 +6,6 @@ import scala.collection.immutable.{ArraySeq,ListMap}
 
 object Rfc8941 {
 
-	import Rfc8941Types._
 	import cats.parse.{Rfc5234=>R5234}
 	import cats.parse.Numbers.{nonNegativeIntString, signedIntString}
 	import cats.parse.{Parser => P, Parser0 => P0}
@@ -49,7 +48,7 @@ object Rfc8941 {
 	val sfString: P[String] = (R5234.dquote *> (unescaped | escaped).rep0 <* R5234.dquote).map(_.mkString)
 	val sfToken: P[Token] = ((R5234.alpha | P.charIn('*')) ~ (Rfc7230.tchar | P.charIn(':', '/')).rep0)
 		.map { (c, lc) => Token((c :: lc).mkString) }
-	val base64: P[Char] = (R5234.alpha | R5234.digit | P.charIn('+', bs, '='))
+	val base64: P[Char] = (R5234.alpha | R5234.digit | P.charIn('+', '/', '='))
 	val sfBinary: P[ArraySeq[Byte]] = (`:` *> base64.rep0 <* `:`).map { chars =>
 		ArraySeq.unsafeWrapArray(Base64.getDecoder.decode(chars.mkString))
 	}
@@ -59,21 +58,21 @@ object Rfc8941 {
 	val Key: P[Key] = ((lcalpha | `*`) ~ (lcalpha | R5234.digit | P.charIn('_', '-', '.', '*')).rep0)
 		.map((c, lc) => (c :: lc).mkString)
 
-	val parameter: P[Rfc8941Types.Parameter] =
+	val parameter: P[Parameter] =
 		(Key ~ (P.char('=') *> bareItem).orElse(P.unit))
 
 	//note: parameters always returns an answer (the empty list) as everything can have parameters
 	//todo: this is not exeactly how it is specified, so check here if something goes wrong
-	val parameters: P0[Rfc8941Types.Parameters] =
+	val parameters: P0[Parameters] =
 		(P.char(';') *> ows *> parameter).rep0.orElse(P.pure(List())).map { list =>
 			ListMap.from[Key, Item](list.iterator)
 		}
 
-	val sfItem: P[PItem] = (bareItem ~ parameters).map(PItem.apply)
+	val sfItem: P[PItem] = (bareItem ~ parameters).map((item,params) => PItem(item,params))
 
 	val innerList: P[IList] = {
 		import R5234.sp
-		(((P.char('(') ~ sp.rep0) *> ((sfItem ~ (sp *> sfItem).rep0 <* sp.rep0).?) <* P.char(')')) ~ parameters)
+		(((P.char('(') ~ sp.rep0) *> ((sfItem ~ (sp.rep(1) *> sfItem).rep0 <* sp.rep0).?) <* P.char(')')) ~ parameters)
 			.map {
 				case (Some(pi, lpi), params) => IList(pi :: lpi, params)
 				case (None, params) => IList(List(), params)
@@ -97,10 +96,10 @@ object Rfc8941 {
 				//todo: avoid this tupling
 				ListMap.from(x.map((d: DictMember) => Tuple.fromProductTyped(d)))
 	)
-}
-
-
-object Rfc8941Types {
+	//
+	//types uses by parser above
+	//
+	
 	sealed abstract class Parameterized //would need to use http4s to get Renderable
 
 	/**
@@ -127,11 +126,21 @@ object Rfc8941Types {
 
 	/** Parameterized Item */
 	final
-	case class PItem(item: Item, params: Parameters = ListMap()) extends Parameterized
+	case class PItem(item: Item, params: Parameters) extends Parameterized
+
+	object PItem {
+		def apply(item: Item): PItem = new PItem(item,ListMap())
+		def apply(item: Item, params: Parameters): PItem = new PItem(item, params)
+		def apply(item: Item)(params: Parameter*): PItem = new PItem(item,ListMap(params*))
+	}
 
 	/** Inner List */
 	final
-	case class IList(items: List[PItem], params: Parameters = ListMap()) extends Parameterized
+	case class IList(items: List[PItem], params: Parameters) extends Parameterized
+
+	object IList {
+		def apply(items: PItem*)(params: Parameter*): IList = new IList(items.toList,ListMap(params*))
+	}
 
 	trait Number
 
@@ -145,4 +154,8 @@ object Rfc8941Types {
 	final case class DecStr(integer: String, dec: String) extends Number
 
 	final case class Token(t: String)
+
+	implicit val token2PI: Conversion[Item,PItem] = (i: Item) => PItem(i)
+	private def paramConversion(paras: Parameter*): Parameters = ListMap(paras*)
+	implicit val paramConv: Conversion[Seq[Parameter],Parameters] = paramConversion
 }

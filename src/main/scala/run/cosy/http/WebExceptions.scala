@@ -1,7 +1,7 @@
 package run.cosy.http
 
 import akka.http.scaladsl.model.{ContentType, HttpHeader, StatusCode, Uri}
-import org.w3.banana.jena.Jena.Rdf
+import run.cosy.RDF.Rdf
 
 import scala.util.control.NoStackTrace
 
@@ -14,7 +14,6 @@ case class ConnectionException(resourceUri: String, e: Throwable) extends WebExc
 case class NodeTranslationException(graphLoc: String, problemNode: Rdf#Node, e: Throwable) extends WebException
 case class MissingParserException(initialContent: String) extends WebException
 case class ParseException(response: ResponseSummary, initialContent: String, e: Throwable) extends WebException
-
 case class ResponseSummary(on: Uri, code: StatusCode, header: Seq[HttpHeader], respTp: ContentType)
 
 trait AuthExc extends WebException
@@ -22,3 +21,6 @@ case class CryptoException(msg: String) extends AuthExc
 case class AuthException(response: ResponseSummary, msg: String) extends AuthExc
 case class InvalidCreatedFieldException(msg: String) extends AuthExc
 case class InvalidExpiresFieldException(msg: String) extends AuthExc
+
+//developed for cosy
+case class HTTPHeaderParseException(error: cats.parse.Parser.Error, httpHeader: String) extends WebException
