@@ -46,8 +46,8 @@ object Rfc8941 {
 			.orElse(P.charIn(0x5d.toChar to 0x7e.toChar))
 	val escaped: P[Char] = (`\\` *> (P.charIn(bs, '"')))
 	val sfString: P[String] = (R5234.dquote *> (unescaped | escaped).rep0 <* R5234.dquote).map(_.mkString)
-	val sfToken: P[Token] = ((R5234.alpha | P.charIn('*')) ~ (Rfc7230.tchar | P.charIn(':', '/')).rep0)
-		.map { (c, lc) => Token((c :: lc).mkString) }
+	val sfToken: P[Key] = ((R5234.alpha | P.charIn('*')) ~ (Rfc7230.tchar | P.charIn(':', '/')).rep0)
+		.map { (c, lc) => Key((c :: lc).mkString) }
 	val base64: P[Char] = (R5234.alpha | R5234.digit | P.charIn('+', '/', '='))
 	val sfBinary: P[ArraySeq[Byte]] = (`:` *> base64.rep0 <* `:`).map { chars =>
 		ArraySeq.unsafeWrapArray(Base64.getDecoder.decode(chars.mkString))
@@ -55,11 +55,11 @@ object Rfc8941 {
 	val bareItem: P[Item] = P.oneOf(sfNumber :: sfString :: sfToken :: sfBinary :: sfBoolean :: Nil)
 	val lcalpha: P[Char] = P.charIn(0x61.toChar to 0x7a.toChar) | P.charIn('a' to 'z')
 
-	val Key: P[Key] = ((lcalpha | `*`) ~ (lcalpha | R5234.digit | P.charIn('_', '-', '.', '*')).rep0)
-		.map((c, lc) => (c :: lc).mkString)
+	val key: P[Key] = ((lcalpha | `*`) ~ (lcalpha | R5234.digit | P.charIn('_', '-', '.', '*')).rep0)
+		.map((c, lc) => Key((c :: lc).mkString))
 
 	val parameter: P[Parameter] =
-		(Key ~ (P.char('=') *> bareItem).orElse(P.unit))
+		(key ~ (P.char('=') *> bareItem).orElse(P.unit))
 
 	//note: parameters always returns an answer (the empty list) as everything can have parameters
 	//todo: this is not exeactly how it is specified, so check here if something goes wrong
@@ -85,7 +85,7 @@ object Rfc8941 {
 
 	val memberValue: P[Parameterized] = (sfItem | innerList)
 	//note: we have to go with parsing `=` first as parameters always returns an answer.
-	val dictMember: P[DictMember] = (Key ~ (P.char('=') *> memberValue).eitherOr(parameters))
+	val dictMember: P[DictMember] = (key ~ (P.char('=') *> memberValue).eitherOr(parameters))
 		.map {
 			case (k, Left(parameters)) => DictMember(k, PItem((), parameters))
 			case (k, Right(parameterized)) => DictMember(k, parameterized)
@@ -96,10 +96,11 @@ object Rfc8941 {
 				//todo: avoid this tupling
 				ListMap.from(x.map((d: DictMember) => Tuple.fromProductTyped(d)))
 	)
+
 	//
 	//types uses by parser above
 	//
-	
+
 	sealed abstract class Parameterized //would need to use http4s to get Renderable
 
 	/**
@@ -108,8 +109,7 @@ object Rfc8941 {
 	 * So one should narrow the classes or be careful on serialisation, i.e. header construction.
 	 * Note: Unit was added. It Allows us to have empty Item parameters. todo: check it's ok.
 	 */
-	type Item = Number | String | Token | ArraySeq[Byte] | Boolean | Unit
-	type Key = String  //todo: Would an Opaque type help here?
+	type Item = Number | String | Key | ArraySeq[Byte] | Boolean | Unit
 	type Parameter = (Key, Item)
 	type Parameters = ListMap[Key, Item]
 	type SfList = List[Parameterized]
@@ -145,6 +145,7 @@ object Rfc8941 {
 	trait Number
 
 	// todo: could one use List[Digit] instead of String, to avoid loosing type info?
+	// todo: arguably Long would do just fine here too.
 	final case class IntStr(integer: String) extends Number
 
 	//Implementations may want to parse these decimals differently. We avoid loosing information
@@ -153,9 +154,10 @@ object Rfc8941 {
 	//to that choice, unless such choices could be passed `using` ops.
 	final case class DecStr(integer: String, dec: String) extends Number
 
-	final case class Token(t: String)
+	final case class Key(t: String)
 
 	implicit val token2PI: Conversion[Item,PItem] = (i: Item) => PItem(i)
 	private def paramConversion(paras: Parameter*): Parameters = ListMap(paras*)
 	implicit val paramConv: Conversion[Seq[Parameter],Parameters] = paramConversion
+	
 }

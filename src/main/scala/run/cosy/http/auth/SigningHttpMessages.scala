@@ -3,7 +3,7 @@ package run.cosy.http.auth
 import akka.http.scaladsl.model.headers.{CustomHeader, RawHeader}
 import akka.http.scaladsl.model.{HttpHeader, HttpRequest}
 import com.nimbusds.jose.util.Base64
-import run.cosy.http.headers.{SigningData, `Signature-Input`}
+import run.cosy.http.headers.{SigningData, SigInput}
 import run.cosy.http.{BetterCustomHeader, BetterCustomHeaderCompanion}
 
 import java.nio.charset.StandardCharsets
@@ -26,7 +26,7 @@ extension (req: HttpRequest)
 	 *            (wrap with a Try in cases where requests are dynamically generated)
 	 */
 	@throws[java.lang.IllegalArgumentException]
-	def withSigInput(sigInput: `Signature-Input`):  SigningData => Try[HttpRequest] = ???
+	def withSigInput(sigInput: SigInput):  SigningData => Try[HttpRequest] = ???
 
 	/**
 	 * Generate the signature string, given the `signature-input` header.
@@ -40,6 +40,6 @@ extension (req: HttpRequest)
 	 *         In the latter case use the withSigInput method.
 	 * todo: it may be more correct if the result is a byte array, rather than a Unicode String.
 	 */
-	def signingString(sigInput: `Signature-Input`): Try[String] = ???
+	def signingString(sigInput: SigInput): Try[String] = ???
 
 

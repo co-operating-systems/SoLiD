@@ -24,7 +24,7 @@ class Rfc8941_Test extends munit.FunSuite {
 	//
 	// test Items
 	//
-	import Rfc8941.{DecStr, IntStr, PItem, Token}
+	import Rfc8941.{DecStr, IntStr, PItem, Key}
 
 	test("test sfBoolean") {
 		assertEquals(sfBoolean.parse("?0"), R(false))
@@ -72,10 +72,10 @@ class Rfc8941_Test extends munit.FunSuite {
 	}
 
 	test("test sfToken") {
-		assertEquals(sfToken.parse("foo123/456"), R(Token("foo123/456")))
-		assertEquals(sfToken.parse("*logicomix:"), R(Token("*logicomix:")))
-		assertEquals(sfToken.parse("*!#$%&'*+-.^_"), R(Token("*!#$%&'*+-.^_")))
-		assertEquals(sfToken.parse("goodmorning"), R(Token("goodmorning")))
+		assertEquals(sfToken.parse("foo123/456"), R(Key("foo123/456")))
+		assertEquals(sfToken.parse("*logicomix:"), R(Key("*logicomix:")))
+		assertEquals(sfToken.parse("*!#$%&'*+-.^_"), R(Key("*!#$%&'*+-.^_")))
+		assertEquals(sfToken.parse("goodmorning"), R(Key("goodmorning")))
 		parseFail(sfToken.parse("!hello"), "can't start with !")
 		parseFailAll(sfToken.parseAll("#good morning"), "can't start with #")
 		parseFailAll(sfToken.parseAll(" goodmorning"), "can't start with space")
@@ -91,7 +91,7 @@ class Rfc8941_Test extends munit.FunSuite {
 		parseFailAll(sfBinary.parseAll(":cHJldGVuZCB0aGlzIGlzIGJpbmFyeSBjb250ZW50Lg"), "must finish with colon")
 		parseFailAll(sfBinary.parseAll(":cHJldGVuZCB0aGlz#IGlzIGJpbmFyeSBjb250ZW50Lg:"), "no hash in the middle")
 	}
-	import Rfc8941.{PItem => PI, Token => Tk, DecStr => Dec, IntStr}
+	import Rfc8941.{PItem => PI, Key, DecStr => Dec, IntStr}
 
 	//
 	// test Lists
@@ -100,15 +100,15 @@ class Rfc8941_Test extends munit.FunSuite {
 	test("test sfList") {
 		assertEquals(
 			sfList.parse("sugar, tea, rum"),
-			R(List(PI(Tk("sugar")), PI(Tk("tea")), PI(Tk("rum"))))
+			R(List(PI(Key("sugar")), PI(Key("tea")), PI(Key("rum"))))
 		)
 		assertEquals(
 			sfList.parse("sugar,tea,rum"),
-			R(List(PI(Tk("sugar")), PI(Tk("tea")), PI(Tk("rum"))))
+			R(List(PI(Key("sugar")), PI(Key("tea")), PI(Key("rum"))))
 		)
 		assertEquals(
 			sfList.parse("sugar, tea ,   rum"),
-			R(List(PI(Tk("sugar")), PI(Tk("tea")), PI(Tk("rum"))))
+			R(List(PI(Key("sugar")), PI(Key("tea")), PI(Key("rum"))))
 		)
 		assertEquals(
 			sfList.parse(""""sugar" , "tea",   "rum""""),
@@ -121,24 +121,23 @@ class Rfc8941_Test extends munit.FunSuite {
 		assertEquals(
 			sfList.parse("""123.450 , 034.33, 42, foo123/456 , ?0  ,  ?1, "rum", :cafebabe:"""),
 			R(List(PI(Dec("123","450")), PI(Dec("034","33")), PI(IntStr("42")),
-				PI(Tk("foo123/456")), PI(false), PI(true), PI("rum"), PI(cafebabe)))
+				PI(Key("foo123/456")), PI(false), PI(true), PI("rum"), PI(cafebabe)))
 		)
 		assertEquals(
 			sfList.parse("""123.450 , 42, foo123/456 , ?0, "No/No", :cafebabe:"""),
 			R(List(PI(Dec("123","450")), PI(IntStr("42")),
-				PI(Tk("foo123/456")), PI(false), PI("No/No"), PI(cafebabe)))
+				PI(Key("foo123/456")), PI(false), PI("No/No"), PI(cafebabe)))
 		)
 		assertEquals(
 			sfList.parse(
 				"""1234.750;  n=4;f=3 , 42;magic="h2g2", foo123/456;lang=en ,
 				  |   ?0;sleep=?1, "No/No", :cafebabe:;enc=unicode""".stripMargin.filter(_ != '\n').toString),
-			R(List(PI(Dec("1234","750"),ListMap("n"->IntStr("4"),"f"->IntStr("3"))),
-				PI(IntStr("42"),ListMap("magic"->"h2g2")),
-				PI(Tk("foo123/456"),ListMap("lang"->Tk("en"))),
-				PI(false,ListMap("sleep"->true)),
-
+			R(List(PI(Dec("1234","750"),ListMap(Key("n")->IntStr("4"),Key("f")->IntStr("3"))),
+				PI(IntStr("42"),ListMap(Key("magic")->"h2g2")),
+				PI(Key("foo123/456"),ListMap(Key("lang")->Key("en"))),
+				PI(false,ListMap(Key("sleep")->true)),
 				PI("No/No"),
-				PI(cafebabe,ListMap("enc" -> Tk("unicode")))))
+				PI(cafebabe,ListMap(Key("enc") -> Key("unicode")))))
 		)
 	}
 
@@ -160,8 +159,8 @@ class Rfc8941_Test extends munit.FunSuite {
 		assertEquals(
 			sfList.parse("""("foo"; a=1;b=2);lvl=5, ("bar" "baz");lvl=1"""),
 			R(List(
-				IL(List(PI("foo",ListMap("a"->IntStr("1"),"b"->IntStr("2")))),ListMap("lvl"->IntStr("5"))),
-				IL(List(PI("bar"),PI("baz")),ListMap("lvl"->IntStr("1")))
+				IL(List(PI("foo",ListMap(Key("a")->IntStr("1"),Key("b")->IntStr("2")))),ListMap(Key("lvl")->IntStr("5"))),
+				IL(List(PI("bar"),PI("baz")),ListMap(Key("lvl")->IntStr("1")))
 			))
 		)
 	}
@@ -171,7 +170,7 @@ class Rfc8941_Test extends munit.FunSuite {
 	test("dict-member") {
 		assertEquals(
 			dictMember.parse("""en="Applepie""""),
-			R(DictMember("en",PI("Applepie")))
+			R(DictMember(Key("en"),PI("Applepie")))
 		)
 	}
 
@@ -179,23 +178,23 @@ class Rfc8941_Test extends munit.FunSuite {
 		assertEquals(
 			sfDictionary.parse("""en="Applepie", da=:cafebabe:"""),
 			R(ListMap(
-				"en" -> PI("Applepie"),
-				"da" -> PI(cafebabe)
+				Key("en") -> PI("Applepie"),
+				Key("da") -> PI(cafebabe)
 			)))
 		assertEquals(
 			sfDictionary.parse("""a=?0, b, c; foo=bar"""),
 			R(ListMap(
-				"a" -> PI(false),
-				"b" -> PI(()),
-				"c" -> PI((),ListMap("foo"->Tk("bar")))
+				Key("a") -> PI(false),
+				Key("b") -> PI(()),
+				Key("c") -> PI((),ListMap(Key("foo")->Key("bar")))
 			)))
 		assertEquals(
 			sfDictionary.parse("""a=(1 2), b=3, c=4;aa=bb, d=(5 6);valid"""),
 			R(ListMap(
-				"a" -> IL(PI(IntStr("1")),PI(IntStr("2")))(),
-				"b" -> PI(IntStr("3"))(),
-				"c" -> PI(IntStr("4"))("aa"->Tk("bb")),
-				"d" -> IL(PI(IntStr("5")),PI(IntStr("6")))("valid"->())
+				Key("a") -> IL(PI(IntStr("1")),PI(IntStr("2")))(),
+				Key("b") -> PI(IntStr("3"))(),
+				Key("c") -> PI(IntStr("4"))(Key("aa")->Key("bb")),
+				Key("d") -> IL(PI(IntStr("5")),PI(IntStr("6")))(Key("valid")->())
 			)))
 	}
 
@@ -213,14 +212,14 @@ class Rfc8941_Test extends munit.FunSuite {
 		assertEquals(
 			sfDictionary.parse(`ex§4.1`),
 			R(ListMap(
-				"sig1" -> IL(
+				Key("sig1") -> IL(
 					"@request-target","host","date","cache-control",
 					"x-empty-header", "x-example"
 				)(
-					"keyid"->"test-key-a",
-					"alg"->"rsa-pss-sha512",
-					"created"->IntStr("1402170695"),
-					"expires"->IntStr("1402170995")
+					Key("keyid")->"test-key-a",
+					Key("alg")->"rsa-pss-sha512",
+					Key("created")->IntStr("1402170695"),
+					Key("expires")->IntStr("1402170995")
 				)
 			))
 		)
@@ -242,7 +241,7 @@ class Rfc8941_Test extends munit.FunSuite {
 
 		assertEquals(
 			sfDictionary.parse(`ex§4.2`),
-			R(ListMap("sig1" -> PI(`ex§4.2value`)))
+			R(ListMap(Key("sig1") -> PI(`ex§4.2value`)))
 		)
 	}
 	
