@@ -12,7 +12,9 @@ import java.time.Instant
 import scala.collection.immutable.ListMap
 import scala.util.{Failure, Success, Try}
 import run.cosy.http.headers.Rfc8941
-import run.cosy.http.headers.Rfc8941.{PItem, Key}
+import run.cosy.http.headers.Rfc8941.{IntStr, PItem, Token}
+
+import scala.collection.immutable
 
 
 /**
@@ -20,7 +22,7 @@ import run.cosy.http.headers.Rfc8941.{PItem, Key}
  *  since the only algorithm now is "hs2019" we don't allow anything else to be set
  * @param text
  */
-final case class `Signature-Input`(sig: ListMap[Rfc8941.Key,SigInput]) extends BetterCustomHeader[`Signature-Input`]:
+final case class `Signature-Input`(sig: ListMap[Rfc8941.Token,SigInput]) extends BetterCustomHeader[`Signature-Input`]:
 	override def renderInRequests = true
 	override def renderInResponses = false
 	override val companion = `Signature-Input`
@@ -31,8 +33,8 @@ object `Signature-Input` extends BetterCustomHeaderCompanion[`Signature-Input`]:
 	override val name = "Signature-Input"
 
 	//override try to generalise later
-	def parse(value: String): Try[ListMap[Rfc8941.Key,SigInput]] =
-		val sig: Try[ListMap[Rfc8941.Key, SigInput]] =
+	def parse(value: String): Try[ListMap[Rfc8941.Token,SigInput]] =
+		val sig: Try[ListMap[Rfc8941.Token, SigInput]] =
 			Rfc8941.sfDictionary.parseAll(value) match {
 				case Left(e) => Failure(HTTPHeaderParseException(e,value))
 				case Right(lm) =>
@@ -71,15 +73,30 @@ object SigInput {
 	val supported: Map[String, HeaderName] =  HeaderName.values.map(hn => (hn.toString,hn)).toMap
 	
 	def unapply(iList: Rfc8941.IList): Option[SigInput] = {
-		val hdrs = iList.items.map{ case PItem(item,params) =>
+		val hdrs: List[HeaderSelector] = iList.items.map{ case PItem(item,params) =>
 			item match
 			case header: String => supported.get(header).map{ hn =>
-//					params.map match {
-//						case (Key("key"),_) => ???
-//					}
-				}.getOrElse(unsupported)
-			case _ => unsupported
+				val ip: immutable.Iterable[Selector] = params.map{
+					case (Token("key"),Token(k)) => KeySelector(k)
+					case (Token("prefix"), IntStr(num)) => PrefixSelector(num.toInt)
+					case _ => unsupported
+				}
+				if ip.exists(_ == unsupported) then UnimplementedSelector
+				else HeaderSelector(hn,ip.toList)
+			}.getOrElse(UnimplementedSelector)
+			case _ => UnimplementedSelector
 		}
+		if hdrs.contains(UnimplementedSelector) then None
+		else iList.params.map{
+			case (Token("keyid"),id: String) => ???
+			case (Token("alg"), "hs2019") => ???
+			case (Token("created"), IntStr(t0)) => ???
+			case (Token("expires"), IntStr(t1)) => ???
+			case _ =>  ???
+		}
+		//this seems too strict. What if there are more attributes in the message received on the signature?
+		//If new attributes, don't break the algorithm, but refine it, then we may still be able to verify
+		//the siganture. If we drop attributes then we won't be able to do that.
 		???
 	}
 	//		flatMap{
@@ -94,9 +111,10 @@ object SigInput {
  *  + [[https://tools.ietf.org/html/draft-ietf-httpbis-message-signatures-03#section-2.3 List Prefixes]]
  * @param header to select
  * @param selectors ordered list of attributes to select from that header. Order is very important here.
+ * todo: it may be better to have HeaderSlectors that each work with a HttpHeader                  
  */
 case class HeaderSelector(header: HeaderName, selectors: List[Selector] = List())
-
+object UnimplementedSelector extends HeaderSelector(HeaderName.`@unimplemented`,List())
 /**
  * Signature Headers supported.
  * Feel free to add new ones by submitting PRs
@@ -106,6 +124,7 @@ case class HeaderSelector(header: HeaderName, selectors: List[Selector] = List()
 enum HeaderName(val special: Boolean = false):
 	case `@request-target` extends HeaderName(true)
 	case `@signature-params` extends HeaderName(true)
+	case `@unimplemented` extends HeaderName(true)
 	case date, server, `cache-control`
 
 sealed trait Selector

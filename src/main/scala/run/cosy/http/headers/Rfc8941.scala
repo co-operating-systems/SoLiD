@@ -46,8 +46,8 @@ object Rfc8941 {
 			.orElse(P.charIn(0x5d.toChar to 0x7e.toChar))
 	val escaped: P[Char] = (`\\` *> (P.charIn(bs, '"')))
 	val sfString: P[String] = (R5234.dquote *> (unescaped | escaped).rep0 <* R5234.dquote).map(_.mkString)
-	val sfToken: P[Key] = ((R5234.alpha | P.charIn('*')) ~ (Rfc7230.tchar | P.charIn(':', '/')).rep0)
-		.map { (c, lc) => Key((c :: lc).mkString) }
+	val sfToken: P[Token] = ((R5234.alpha | P.charIn('*')) ~ (Rfc7230.tchar | P.charIn(':', '/')).rep0)
+		.map { (c, lc) => Token((c :: lc).mkString) }
 	val base64: P[Char] = (R5234.alpha | R5234.digit | P.charIn('+', '/', '='))
 	val sfBinary: P[ArraySeq[Byte]] = (`:` *> base64.rep0 <* `:`).map { chars =>
 		ArraySeq.unsafeWrapArray(Base64.getDecoder.decode(chars.mkString))
@@ -55,8 +55,8 @@ object Rfc8941 {
 	val bareItem: P[Item] = P.oneOf(sfNumber :: sfString :: sfToken :: sfBinary :: sfBoolean :: Nil)
 	val lcalpha: P[Char] = P.charIn(0x61.toChar to 0x7a.toChar) | P.charIn('a' to 'z')
 
-	val key: P[Key] = ((lcalpha | `*`) ~ (lcalpha | R5234.digit | P.charIn('_', '-', '.', '*')).rep0)
-		.map((c, lc) => Key((c :: lc).mkString))
+	val key: P[Token] = ((lcalpha | `*`) ~ (lcalpha | R5234.digit | P.charIn('_', '-', '.', '*')).rep0)
+		.map((c, lc) => Token((c :: lc).mkString))
 
 	val parameter: P[Parameter] =
 		(key ~ (P.char('=') *> bareItem).orElse(P.unit))
@@ -65,7 +65,7 @@ object Rfc8941 {
 	//todo: this is not exeactly how it is specified, so check here if something goes wrong
 	val parameters: P0[Parameters] =
 		(P.char(';') *> ows *> parameter).rep0.orElse(P.pure(List())).map { list =>
-			ListMap.from[Key, Item](list.iterator)
+			ListMap.from[Token, Item](list.iterator)
 		}
 
 	val sfItem: P[PItem] = (bareItem ~ parameters).map((item,params) => PItem(item,params))
@@ -90,7 +90,7 @@ object Rfc8941 {
 			case (k, Left(parameters)) => DictMember(k, PItem((), parameters))
 			case (k, Right(parameterized)) => DictMember(k, parameterized)
 		}
-	val sfDictionary: P[ListMap[Key, Parameterized]] =
+	val sfDictionary: P[ListMap[Token, Parameterized]] =
 		(dictMember ~ ((ows *> P.char(',') *> ows).with1 *> dictMember).rep0).map((dm, list) =>
 			val x: List[DictMember] = dm :: list
 				//todo: avoid this tupling
@@ -109,9 +109,9 @@ object Rfc8941 {
 	 * So one should narrow the classes or be careful on serialisation, i.e. header construction.
 	 * Note: Unit was added. It Allows us to have empty Item parameters. todo: check it's ok.
 	 */
-	type Item = Number | String | Key | ArraySeq[Byte] | Boolean | Unit
-	type Parameter = (Key, Item)
-	type Parameters = ListMap[Key, Item]
+	type Item = Number | String | Token | ArraySeq[Byte] | Boolean | Unit
+	type Parameter = (Token, Item)
+	type Parameters = ListMap[Token, Item]
 	type SfList = List[Parameterized]
 
 	/**
@@ -122,7 +122,7 @@ object Rfc8941 {
 	 * @param values if InnerList with an empty list, then we have "parameters", else we have an inner list
 	 */
 	final
-	case class DictMember(key: Key, values: Parameterized)
+	case class DictMember(key: Token, values: Parameterized)
 
 	/** Parameterized Item */
 	final
@@ -154,7 +154,7 @@ object Rfc8941 {
 	//to that choice, unless such choices could be passed `using` ops.
 	final case class DecStr(integer: String, dec: String) extends Number
 
-	final case class Key(t: String)
+	final case class Token(t: String)
 
 	implicit val token2PI: Conversion[Item,PItem] = (i: Item) => PItem(i)
 	private def paramConversion(paras: Parameter*): Parameters = ListMap(paras*)
