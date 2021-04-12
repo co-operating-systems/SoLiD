@@ -4,7 +4,7 @@ import cats.parse.Parser
 import cats.parse.Parser.{Expectation, Fail}
 import cats.data.NonEmptyList
 import run.cosy.http.headers.Rfc8941
-import Rfc8941.{dictMember, sfBinary, sfBoolean, sfDecimal, sfDictionary, sfInteger, sfList, sfNumber, sfString, sfToken}
+import Rfc8941.Parser.{dictMember, sfBinary, sfBoolean, sfDecimal, sfDictionary, sfInteger, sfList, sfNumber, sfString, sfToken}
 
 import java.util.Base64
 import scala.collection.immutable.{ArraySeq, ListMap}
@@ -21,6 +21,7 @@ class Rfc8941_Test extends munit.FunSuite {
 	def parseFailAll[T](result: Either[Parser.Error,T], msg: String="")(implicit loc: munit.Location): Unit =
 		assert(result.isLeft,result)
 
+	import Rfc8941.Parser.*
 	//
 	// test Items
 	//
@@ -224,20 +225,22 @@ class Rfc8941_Test extends munit.FunSuite {
 			))
 		)
 
-		val `ex§4.2`: String = """sig1=:K2qGT5srn2OGbOIDzQ6kYT+ruaycnDAAUpKv+ePFfD0RAxn/1BUe\
-							  |      Zx/Kdrq32DrfakQ6bPsvB9aqZqognNT6be4olHROIkeV879RrsrObury8L9SCEibe\
-							  |      oHyqU/yCjphSmEdd7WD+zrchK57quskKwRefy2iEC5S2uAH0EPyOZKWlvbKmKu5q4\
-							  |      CaB8X/I5/+HLZLGvDiezqi6/7p2Gngf5hwZ0lSdy39vyNMaaAT0tKo6nuVw0S1MVg\
-							  |      1Q7MpWYZs0soHjttq0uLIA3DIbQfLiIvK6/l0BdWTU7+2uQj7lBkQAsFZHoA96ZZg\
-							  |      FquQrXRlmYOh+Hx5D9fJkXcXe5tmAg==:""".rfc8792single
+		val `ex§4.2`: String =
+		"""sig1=:K2qGT5srn2OGbOIDzQ6kYT+ruaycnDAAUpKv+ePFfD0RAxn/1BUe\
+		|     Zx/Kdrq32DrfakQ6bPsvB9aqZqognNT6be4olHROIkeV879RrsrObury8L9SCEibe\
+		|     oHyqU/yCjphSmEdd7WD+zrchK57quskKwRefy2iEC5S2uAH0EPyOZKWlvbKmKu5q4\
+		|     CaB8X/I5/+HLZLGvDiezqi6/7p2Gngf5hwZ0lSdy39vyNMaaAT0tKo6nuVw0S1MVg\
+		|     1Q7MpWYZs0soHjttq0uLIA3DIbQfLiIvK6/l0BdWTU7+2uQj7lBkQAsFZHoA96ZZg\
+		|     FquQrXRlmYOh+Hx5D9fJkXcXe5tmAg==:""".rfc8792single
 		println("4.2="+`ex§4.2`)
 
-		val `ex§4.2value`: ArraySeq[Byte]    = """K2qGT5srn2OGbOIDzQ6kYT+ruaycnDAAUpKv+ePFfD0RAxn/1BUe\
-									 |      Zx/Kdrq32DrfakQ6bPsvB9aqZqognNT6be4olHROIkeV879RrsrObury8L9SCEibe\
-									 |      oHyqU/yCjphSmEdd7WD+zrchK57quskKwRefy2iEC5S2uAH0EPyOZKWlvbKmKu5q4\
-									 |      CaB8X/I5/+HLZLGvDiezqi6/7p2Gngf5hwZ0lSdy39vyNMaaAT0tKo6nuVw0S1MVg\
-									 |      1Q7MpWYZs0soHjttq0uLIA3DIbQfLiIvK6/l0BdWTU7+2uQj7lBkQAsFZHoA96ZZg\
-									 |      FquQrXRlmYOh+Hx5D9fJkXcXe5tmAg==""".rfc8792single.base64Decode
+		val `ex§4.2value`: ArraySeq[Byte]    =
+		"""K2qGT5srn2OGbOIDzQ6kYT+ruaycnDAAUpKv+ePFfD0RAxn/1BUe\
+		|  Zx/Kdrq32DrfakQ6bPsvB9aqZqognNT6be4olHROIkeV879RrsrObury8L9SCEibe\
+		|  oHyqU/yCjphSmEdd7WD+zrchK57quskKwRefy2iEC5S2uAH0EPyOZKWlvbKmKu5q4\
+		|  CaB8X/I5/+HLZLGvDiezqi6/7p2Gngf5hwZ0lSdy39vyNMaaAT0tKo6nuVw0S1MVg\
+		|  1Q7MpWYZs0soHjttq0uLIA3DIbQfLiIvK6/l0BdWTU7+2uQj7lBkQAsFZHoA96ZZg\
+		|  FquQrXRlmYOh+Hx5D9fJkXcXe5tmAg==""".rfc8792single.base64Decode
 
 		assertEquals(
 			sfDictionary.parse(`ex§4.2`),

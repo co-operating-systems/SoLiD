@@ -35,7 +35,7 @@ object `Signature-Input` extends BetterCustomHeaderCompanion[`Signature-Input`]:
 	//override try to generalise later
 	def parse(value: String): Try[ListMap[Rfc8941.Token,SigInput]] =
 		val sig: Try[ListMap[Rfc8941.Token, SigInput]] =
-			Rfc8941.sfDictionary.parseAll(value) match {
+			Rfc8941.Parser.sfDictionary.parseAll(value) match {
 				case Left(e) => Failure(HTTPHeaderParseException(e,value))
 				case Right(lm) =>
 					val x = lm.collect{
@@ -56,17 +56,26 @@ object `Signature-Input` extends BetterCustomHeaderCompanion[`Signature-Input`]:
 	}
 end `Signature-Input`
 
-case class SigInput(headers: Seq[HeaderSelector],
-	keyId: String, created: Option[Long], expires: Option[Long]) {
+case class SigInput(headers: Seq[HeaderSelector], att: SigAttributes) {
 
-	override def toString: String = s"""($headersString); $attributes"""
+	override def toString: String = s"""($headersString); $att"""
 	def headersString: String = headers.map(name=>s""""$name"""").mkString(" ")
-	def attributes: String = s"""keyid="$keyId"; alg="hs2019""""++dateString
 
 	private def dateString: String =
-		val cs = created.map(c=> s"; created=$c").getOrElse("")
-		val ts = expires.map(t=> s"; expires=$t").getOrElse("")
+		val cs = att.created.map(c=> s"; created=$c").getOrElse("")
+		val ts = att.expires.map(t=> s"; expires=$t").getOrElse("")
 		cs ++ ts
+}
+
+/**
+ * We lump the parameters together as there may be some we can't interpret,
+ * but we requure keyId to be present.
+ **/
+class SigAttributes(keyId: String, params: Rfc8941.Parameters) {
+	//for both created and expires we return the time only if the types are correct, otherwise we ignore.
+	def created: Option[Long] = params.get(Token("created")).collect{case IntStr(num) => num.toLong}
+	def expires: Option[Long] = params.get(Token("expires")).collect{case IntStr(num) => num.toLong}
+	override def toString(): String =  ???
 }
 
 object SigInput {
