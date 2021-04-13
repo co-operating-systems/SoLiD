@@ -90,7 +90,7 @@ object Rfc8941 {
 		//note: we have to go with parsing `=` first as parameters always returns an answer.
 		val dictMember: P[DictMember] = (key ~ (P.char('=') *> memberValue).eitherOr(parameters))
 			.map {
-				case (k, Left(parameters)) => DictMember(k, parameters)
+				case (k, Left(parameters)) => DictMember(k, PItem(true,parameters))
 				case (k, Right(parameterized)) => DictMember(k, parameterized)
 			}
 		val sfDictionary: P[SfDict] =
@@ -157,6 +157,17 @@ object Rfc8941 {
 				def canon: String =
 					o.items.map(i=>i.canon).mkString("("," ",")")+o.params.canon
 
+		given sfDictSer(using
+			Serialise[Item], Serialise[Param], Serialise[Params],
+			Serialise[PItem], Serialise[IList]
+		): Serialise[SfDict] with
+			extension (o: SfDict)
+				def canon: String = o.map{
+					case (tk, PItem(true,params)) => tk.canon+params.canon
+					case (tk, pit: PItem) => tk.canon+"="+pit.canon
+					case (tk, lst: IList) => tk.canon+"="+lst.canon
+				}.mkString(", ")
+
 	}
 	//
 	//types uses by parser above
@@ -174,11 +185,11 @@ object Rfc8941 {
 	type Param = (Token, Item)
 	type Params = ListMap[Token, Item]
 	type SfList = List[Paramed]
-	type SfDict = ListMap[Token, Paramed|Params]
+	type SfDict = ListMap[Token, Paramed]
 
 	def Param(tk: String, i: Item): Param = (Token(tk),i)
 	def Params(ps: Param*): Params = ListMap(ps*)
-	def SfDict(entries: (Token,Paramed|Params)*) = ListMap(entries*)
+	def SfDict(entries: (Token,Paramed)*) = ListMap(entries*)
 	/**
 	 * dict-member    = member-key ( parameters / ( "=" member-value ))
 	 * member-value   = sf-item / inner-list
@@ -187,7 +198,7 @@ object Rfc8941 {
 	 * @param values if InnerList with an empty list, then we have "parameters", else we have an inner list
 	 */
 	final
-	case class DictMember(key: Token, values: Paramed|Params)
+	case class DictMember(key: Token, values: Paramed)
 
 	/** Parameterized Item */
 	final

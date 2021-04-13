@@ -187,8 +187,8 @@ class Rfc8941_Test extends munit.FunSuite {
 			sfDictionary.parse("""a=?0, b, c; foo=bar"""),
 			R(SfDict(
 				Token("a") -> PI(false),
-				Token("b") -> ListMap(),
-				Token("c") -> ListMap(Token("foo")->Token("bar"))
+				Token("b") -> PI(true)(),
+				Token("c") -> PI(true)(Token("foo") ->Token("bar"))
 			)))
 		assertEquals(
 			sfDictionary.parse("""a=(1 2), b=3, c=4;aa=bb, d=(5 6);valid"""),
@@ -286,6 +286,7 @@ class Rfc8941_Test extends munit.FunSuite {
 			""":cafebabe:;enc="utf8""""
 		)
 	}
+
 	test("serialisation of List") {
 		import scala.language.implicitConversions
 		//example from
@@ -306,6 +307,14 @@ class Rfc8941_Test extends munit.FunSuite {
 			  |   "x-empty-header" "x-example" "x-dictionary";key=b \
 			  |   "x-dictionary";key=a "x-list";prefix=3);keyid="test-key-a";\
 			  |   alg="rsa-pss-sha512";created=1402170695;expires=1402170995""".rfc8792single
+		)
+	}
+
+	test("serialisation of sfDict") {
+		import scala.language.implicitConversions
+		assertEquals(
+			SfDict(Token("key")->PItem(true)(Param("encoding",Token("utf8")))).canon,
+			"key;encoding=utf8"
 		)
 	}
 	
