@@ -138,8 +138,6 @@ object Rfc8941 {
 					case i: IntStr => i.integer
 					case d: DecStr => d.integer + "." + d.dec
 
-
-		
 		//
 		// complex types
 		//
@@ -149,11 +147,6 @@ object Rfc8941 {
 					case b: Boolean => ""
 					case other => other.canon
 				}}
-
-
-
-
-
 
 	}
 	//
