@@ -316,6 +316,25 @@ class Rfc8941_Test extends munit.FunSuite {
 			SfDict(Token("key")->PItem(true)(Param("encoding",Token("utf8")))).canon,
 			"key;encoding=utf8"
 		)
+		val `ex§4.1` = """sig1=("@request-target" "host" "date" "cache-control" \
+							  |      "x-empty-header" "x-example");keyid="test-key-a";\
+							  |       alg="rsa-pss-sha512";created=1402170695;expires=1402170995\
+							  |""".rfc8792single
+
+		assertEquals(
+			SfDict(
+				Token("sig1") -> IL(
+					"@request-target","host","date","cache-control",
+					"x-empty-header", "x-example"
+				)(
+					Token("keyid")->"test-key-a",
+					Token("alg")->"rsa-pss-sha512",
+					Token("created")->IntStr("1402170695"),
+					Token("expires")->IntStr("1402170995")
+				)
+			).canon,
+			`ex§4.1`
+		)
 	}
 	
 }
