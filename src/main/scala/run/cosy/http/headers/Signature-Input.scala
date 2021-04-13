@@ -71,7 +71,7 @@ case class SigInput(headers: Seq[HeaderSelector], att: SigAttributes) {
  * We lump the parameters together as there may be some we can't interpret,
  * but we requure keyId to be present.
  **/
-class SigAttributes(keyId: String, params: Rfc8941.Parameters) {
+class SigAttributes(keyId: String, params: Rfc8941.Params) {
 	//for both created and expires we return the time only if the types are correct, otherwise we ignore.
 	def created: Option[Long] = params.get(Token("created")).collect{case IntStr(num) => num.toLong}
 	def expires: Option[Long] = params.get(Token("expires")).collect{case IntStr(num) => num.toLong}

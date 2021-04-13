@@ -5,7 +5,7 @@ import cats.parse.Parser.{Expectation, Fail}
 import cats.data.NonEmptyList
 import run.cosy.http.headers.Rfc8941
 import Rfc8941.Parser.{dictMember, sfBinary, sfBoolean, sfDecimal, sfDictionary, sfInteger, sfList, sfNumber, sfString, sfToken}
-import run.cosy.http.headers.Rfc8941.SfDict
+import run.cosy.http.headers.Rfc8941.{IList, Param, Params, SfDict}
 
 import java.util.Base64
 import scala.collection.immutable.{ArraySeq, ListMap}
@@ -199,12 +199,12 @@ class Rfc8941_Test extends munit.FunSuite {
 				Token("d") -> IL(PI(IntStr("5")),PI(IntStr("6")))(Token("valid")->true)
 			)))
 	}
-
+	
+	import run.cosy.ldp.testUtils.StringUtils._
 	//examples are taken from https://tools.ietf.org/html/draft-ietf-httpbis-message-signatures-03
 	test("sfDictionary with Signing Http Messages headers") {
 		//here we start playing with making the syntax easier to work with by using implicit conversions
 		import scala.language.implicitConversions
-		import run.cosy.ldp.testUtils.StringUtils._
 
 		val `ex§4.1` = """sig1=("@request-target" "host" "date"   "cache-control" \
 						|      "x-empty-header" "x-example"); keyid="test-key-a"; \
@@ -256,13 +256,57 @@ class Rfc8941_Test extends munit.FunSuite {
 		assertEquals(IntStr("234").canon, "234")
 		assertEquals("hello".canon, """"hello"""")
 		assertEquals(DecStr("1024","48").canon,"1024.48")
-		assertEquals(cafebabe.canon,":cafebabe")
-		assertEquals(cafedead.canon,":cafedead")
+		assertEquals(cafebabe.canon,":cafebabe:")
+		assertEquals(cafedead.canon,":cafedead:")
 	}
-
-	test("serialisation of Parameter") {
-		assertEquals((Token("fun"),true).canon,";fun")
-
+	import Rfc8941.{Token=>Tk}
+	test("serialisation of Parameterized Items") {
+		assertEquals(Param("fun",true).canon,";fun")
+		assertEquals(Params(Tk("fun")->true).canon,";fun")
+		assertEquals(
+			Params(Tk("foo")->true, Tk("bar")->IntStr("42")).canon,
+			";foo;bar=42")
+		assertEquals(
+			Params(Tk("foo")->true, Tk("bar")->IntStr("42"),Tk("baz")->"hello").canon,
+			""";foo;bar=42;baz="hello"""")
+		assertEquals(
+			Params(Tk("keyid")->cafebabe).canon,
+			";keyid=:cafebabe:"
+		)
+		assertEquals(
+			PItem(Tk("*foo"))(Tk("age")->IntStr("33")).canon,
+			"*foo;age=33"
+		)
+		assertEquals(
+			PItem(DecStr("99","999"))(Tk("discount")-> DecStr("0","2")).canon,
+			"99.999;discount=0.2"
+		)
+		assertEquals(
+			PItem(cafebabe)(Tk("enc")-> "utf8").canon,
+			""":cafebabe:;enc="utf8""""
+		)
+	}
+	test("serialisation of List") {
+		import scala.language.implicitConversions
+		//example from
+		// https://tools.ietf.org/html/draft-ietf-httpbis-message-signatures-03#section-2.4.2.1
+		// but whitespaces between attributes have been removed as per
+		// issue: https://github.com/httpwg/http-extensions/issues/1456
+		assertEquals(
+			IList("@request-target", "host", "date","cache-control","x-empty-header", "x-example",
+				PItem("x-dictionary")(Param("key",Tk("b"))),
+				PItem("x-dictionary")(Param("key",Tk("a"))),
+				PItem("x-list")(Param("prefix",IntStr("3"))))(
+				Param("keyid","test-key-a"),
+				Param("alg","rsa-pss-sha512"),
+				Param("created",IntStr("1402170695")),
+				Param("expires",IntStr("1402170995")),
+			).canon,
+			"""("@request-target" "host" "date" "cache-control" \
+			  |   "x-empty-header" "x-example" "x-dictionary";key=b \
+			  |   "x-dictionary";key=a "x-list";prefix=3);keyid="test-key-a";\
+			  |   alg="rsa-pss-sha512";created=1402170695;expires=1402170995""".rfc8792single
+		)
 	}
 	
 }

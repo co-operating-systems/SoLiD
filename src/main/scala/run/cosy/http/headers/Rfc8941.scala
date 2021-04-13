@@ -1,7 +1,9 @@
 package run.cosy.http.headers
 
+import run.cosy.http.headers.Rfc8941.Serialise.Serialise
+
 import java.util.Base64
-import scala.collection.immutable.{ArraySeq,ListMap}
+import scala.collection.immutable.{ArraySeq, ListMap}
 
 
 object Rfc8941 {
@@ -59,12 +61,12 @@ object Rfc8941 {
 		val key: P[Token] = ((lcalpha | `*`) ~ (lcalpha | R5234.digit | P.charIn('_', '-', '.', '*')).rep0)
 			.map((c, lc) => Token((c :: lc).mkString))
 
-		val parameter: P[Parameter] =
+		val parameter: P[Param] =
 			(key ~ (P.char('=') *> bareItem).orElse(P.pure(true)))
 
 		//note: parameters always returns an answer (the empty list) as everything can have parameters
 		//todo: this is not exeactly how it is specified, so check here if something goes wrong
-		val parameters: P0[Parameters] =
+		val parameters: P0[Params] =
 		(P.char(';') *> ows *> parameter).rep0.orElse(P.pure(List())).map { list =>
 			ListMap.from[Token, Item](list.iterator)
 		}
@@ -79,12 +81,12 @@ object Rfc8941 {
 					case (None, params) => IList(List(), params)
 				}
 		}
-		val listMember: P[Parameterized] = (sfItem | innerList)
+		val listMember: P[Paramed] = (sfItem | innerList)
 
 		val sfList: P[SfList] =
 			(listMember ~ ((ows *> P.char(',') *> ows).void.with1 *> listMember).rep0).map((p, lp) => p :: lp)
 
-		val memberValue: P[Parameterized] = (sfItem | innerList)
+		val memberValue: P[Paramed] = (sfItem | innerList)
 		//note: we have to go with parsing `=` first as parameters always returns an answer.
 		val dictMember: P[DictMember] = (key ~ (P.char('=') *> memberValue).eitherOr(parameters))
 			.map {
@@ -111,49 +113,56 @@ object Rfc8941 {
 	object Serialise {
 
 		trait Serialise[-T]:
-			extension (t: T)
+			extension (o: T)
 			   //may be better if encoded directly to a byte string
 				def canon: String
 
-		given boolSer: Serialise[Boolean] with
-			extension (t: Boolean)
-				def canon: String = if t then "?1" else "?0"
-
-		given byteSer: Serialise[ArraySeq[Byte]] with
-			extension (t: ArraySeq[Byte])
-				def canon: String = ":"+Base64.getEncoder
-					.encodeToString(t.unsafeArray.asInstanceOf[Array[Byte]])
-
-		given tokenSer: Serialise[Token] with
-			extension (t: Token)
-				def canon: String = t.t
-
-		given stringSer: Serialise[String] with
-			extension (t: String)
-				def canon: String = s""""$t""""
-		
-		given numberSer: Serialise[Number] with
-			extension (t: Number)
-				def canon: String = t match
+		given itemSer: Serialise[Item] with
+			extension (o: Item)
+				def canon: String = o match
 					case i: IntStr => i.integer
+					//todo: https://www.rfc-editor.org/rfc/rfc8941.html#ser-decimal
 					case d: DecStr => d.integer + "." + d.dec
+					case s: String =>  s""""$s""""
+					case tk: Token => tk.t
+					case as: ArraySeq[Byte] => ":"+Base64.getEncoder
+						.encodeToString(as.unsafeArray.asInstanceOf[Array[Byte]])+":"
+					case b: Boolean => if b then "?1" else "?0"
 
 		//
 		// complex types
 		//
-		given paramSer[A<:Item](using Serialise[A]): Serialise[(Token,A)] with
-			extension (t: (Token,A))
-				def canon: String = ";"+t._1.canon + {t._2 match {
+
+		given paramSer(using Serialise[Item]): Serialise[Param] with
+			extension (o: Param)
+				def canon: String = ";"+o._1.canon + {o._2 match {
 					case b: Boolean => ""
-					case other => other.canon
+					case other => "="+other.canon
 				}}
+
+		given paramsSer(using Serialise[Param]): Serialise[Params] with
+			extension (o: Params)
+				def canon: String = o.map(_.canon).mkString
+
+		given paramItemSer(using
+			Serialise[Item], Serialise[Params]
+		): Serialise[PItem] with
+			extension (o: PItem)
+				def canon: String = o.item.canon + o.params.canon
+
+		given sfListSer(using
+			Serialise[Item], Serialise[Params]
+		): Serialise[IList] with
+			extension (o: IList)
+				def canon: String =
+					o.items.map(i=>i.canon).mkString("("," ",")")+o.params.canon
 
 	}
 	//
 	//types uses by parser above
 	//
-
-	sealed abstract class Parameterized //would need to use http4s to get Renderable
+	/** trait for Parameterizes types */
+	sealed abstract class Paramed //would need to use http4s to get Renderable
 
 	/**
 	 * see [[https://www.rfc-editor.org/rfc/rfc8941.html#section-3.3 §3.3 Items]] of RFC8941.
@@ -161,13 +170,15 @@ object Rfc8941 {
 	 * So one should narrow the classes or be careful on serialisation, i.e. header construction.
 	 * Note: Unit was added. It Allows us to have empty Item parameters. todo: check it's ok.
 	 */
-	type Item = Number | String | Token | ArraySeq[Byte] | Boolean 
-	type Parameter = (Token, Item)
-	type Parameters = ListMap[Token, Item]
-	type SfList = List[Parameterized]
-	type SfDict = ListMap[Token, Parameterized|Parameters]
+	type Item = Number | String | Token | ArraySeq[Byte] | Boolean
+	type Param = (Token, Item)
+	type Params = ListMap[Token, Item]
+	type SfList = List[Paramed]
+	type SfDict = ListMap[Token, Paramed|Params]
 
-	def SfDict(entries: (Token,Parameterized|Parameters)*) = ListMap(entries*)
+	def Param(tk: String, i: Item): Param = (Token(tk),i)
+	def Params(ps: Param*): Params = ListMap(ps*)
+	def SfDict(entries: (Token,Paramed|Params)*) = ListMap(entries*)
 	/**
 	 * dict-member    = member-key ( parameters / ( "=" member-value ))
 	 * member-value   = sf-item / inner-list
@@ -176,27 +187,26 @@ object Rfc8941 {
 	 * @param values if InnerList with an empty list, then we have "parameters", else we have an inner list
 	 */
 	final
-	case class DictMember(key: Token, values: Parameterized|Parameters)
+	case class DictMember(key: Token, values: Paramed|Params)
 
 	/** Parameterized Item */
 	final
-	case class PItem(item: Item, params: Parameters) extends Parameterized
+	case class PItem(item: Item, params: Params) extends Paramed
 
 	object PItem {
 		def apply(item: Item): PItem = new PItem(item,ListMap())
-		def apply(item: Item, params: Parameters): PItem = new PItem(item, params)
-		def apply(item: Item)(params: Parameter*): PItem = new PItem(item,ListMap(params*))
+		def apply(item: Item)(params: Param*): PItem = new PItem(item,ListMap(params*))
 	}
 
 	/** Inner List */
 	final
-	case class IList(items: List[PItem], params: Parameters) extends Parameterized
+	case class IList(items: List[PItem], params: Params) extends Paramed
 
 	object IList {
-		def apply(items: PItem*)(params: Parameter*): IList = new IList(items.toList,ListMap(params*))
+		def apply(items: PItem*)(params: Param*): IList = new IList(items.toList,ListMap(params*))
 	}
 
-	trait Number
+	sealed trait Number
 
 	// todo: could one use List[Digit] instead of String, to avoid loosing type info?
 	// todo: arguably Long would do just fine here too.
@@ -206,12 +216,14 @@ object Rfc8941 {
 	//by not interpreting at this point. There may be a way not to loose that, but it would require
 	//quite a lot of digging into the BigDecimal class' functioning. That would also tie this layer
 	//to that choice, unless such choices could be passed `using` ops.
+	//todo: details of how to map to BigDecimal are
+	// here https://www.rfc-editor.org/rfc/rfc8941.html#ser-decimal
 	final case class DecStr(integer: String, dec: String) extends Number
 
 	final case class Token(t: String)
 
 	implicit val token2PI: Conversion[Item,PItem] = (i: Item) => PItem(i)
-	private def paramConversion(paras: Parameter*): Parameters = ListMap(paras*)
-	implicit val paramConv: Conversion[Seq[Parameter],Parameters] = paramConversion
+	private def paramConversion(paras: Param*): Params = ListMap(paras*)
+	implicit val paramConv: Conversion[Seq[Param],Params] = paramConversion
 	
 }
