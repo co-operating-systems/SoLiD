@@ -5,6 +5,7 @@ import cats.parse.Parser.{Expectation, Fail}
 import cats.data.NonEmptyList
 import run.cosy.http.headers.Rfc8941
 import Rfc8941.Parser.{dictMember, sfBinary, sfBoolean, sfDecimal, sfDictionary, sfInteger, sfList, sfNumber, sfString, sfToken}
+import run.cosy.http.headers.Rfc8941.SfDict
 
 import java.util.Base64
 import scala.collection.immutable.{ArraySeq, ListMap}
@@ -184,18 +185,18 @@ class Rfc8941_Test extends munit.FunSuite {
 			)))
 		assertEquals(
 			sfDictionary.parse("""a=?0, b, c; foo=bar"""),
-			R(ListMap(
+			R(SfDict(
 				Token("a") -> PI(false),
-				Token("b") -> PI(()),
-				Token("c") -> PI((),ListMap(Token("foo")->Token("bar")))
+				Token("b") -> ListMap(),
+				Token("c") -> ListMap(Token("foo")->Token("bar"))
 			)))
 		assertEquals(
 			sfDictionary.parse("""a=(1 2), b=3, c=4;aa=bb, d=(5 6);valid"""),
-			R(ListMap(
+			R(SfDict(
 				Token("a") -> IL(PI(IntStr("1")),PI(IntStr("2")))(),
 				Token("b") -> PI(IntStr("3"))(),
 				Token("c") -> PI(IntStr("4"))(Token("aa")->Token("bb")),
-				Token("d") -> IL(PI(IntStr("5")),PI(IntStr("6")))(Token("valid")->())
+				Token("d") -> IL(PI(IntStr("5")),PI(IntStr("6")))(Token("valid")->true)
 			)))
 	}
 
@@ -232,7 +233,6 @@ class Rfc8941_Test extends munit.FunSuite {
 		|     CaB8X/I5/+HLZLGvDiezqi6/7p2Gngf5hwZ0lSdy39vyNMaaAT0tKo6nuVw0S1MVg\
 		|     1Q7MpWYZs0soHjttq0uLIA3DIbQfLiIvK6/l0BdWTU7+2uQj7lBkQAsFZHoA96ZZg\
 		|     FquQrXRlmYOh+Hx5D9fJkXcXe5tmAg==:""".rfc8792single
-		println("4.2="+`ex§4.2`)
 
 		val `ex§4.2value`: ArraySeq[Byte]    =
 		"""K2qGT5srn2OGbOIDzQ6kYT+ruaycnDAAUpKv+ePFfD0RAxn/1BUe\
@@ -246,6 +246,23 @@ class Rfc8941_Test extends munit.FunSuite {
 			sfDictionary.parse(`ex§4.2`),
 			R(ListMap(Token("sig1") -> PI(`ex§4.2value`)))
 		)
+	}
+
+	import Rfc8941.Serialise.{given,*}
+	test("serialisation of Items") {
+		assertEquals(true.canon, "?1")
+		assertEquals(false.canon, "?0")
+		assertEquals(Token("*ab/d").canon, "*ab/d")
+		assertEquals(IntStr("234").canon, "234")
+		assertEquals("hello".canon, """"hello"""")
+		assertEquals(DecStr("1024","48").canon,"1024.48")
+		assertEquals(cafebabe.canon,":cafebabe")
+		assertEquals(cafedead.canon,":cafedead")
+	}
+
+	test("serialisation of Parameter") {
+		assertEquals((Token("fun"),true).canon,";fun")
+
 	}
 	
 }

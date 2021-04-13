@@ -18,10 +18,10 @@ object Rfc8941 {
 		private val `.` = P.char('.')
 		private val bs = '\\'
 		private val minus = P.char('-')
-		val `\\`: P[Unit] = P.char(bs)
+		private val `\\`: P[Unit] = P.char(bs)
 
 		val boolean: P[Boolean] = R5234.bit.map(_ == '1')
-		val sfBoolean = (`?` *> boolean)
+		val sfBoolean: P[Boolean] = (`?` *> boolean)
 		val sfInteger: P[IntStr] = (minus.?.with1 ~ R5234.digit.rep(1, 15)).string.map(IntStr.apply)
 		val decFraction: P[String] = R5234.digit.rep(1, 3).string
 		val signedDecIntegral: P[String] = (minus.?.with1 ~ R5234.digit.rep(1, 12)).map { case (min, i) =>
@@ -60,7 +60,7 @@ object Rfc8941 {
 			.map((c, lc) => Token((c :: lc).mkString))
 
 		val parameter: P[Parameter] =
-			(key ~ (P.char('=') *> bareItem).orElse(P.unit))
+			(key ~ (P.char('=') *> bareItem).orElse(P.pure(true)))
 
 		//note: parameters always returns an answer (the empty list) as everything can have parameters
 		//todo: this is not exeactly how it is specified, so check here if something goes wrong
@@ -88,15 +88,73 @@ object Rfc8941 {
 		//note: we have to go with parsing `=` first as parameters always returns an answer.
 		val dictMember: P[DictMember] = (key ~ (P.char('=') *> memberValue).eitherOr(parameters))
 			.map {
-				case (k, Left(parameters)) => DictMember(k, PItem((), parameters))
+				case (k, Left(parameters)) => DictMember(k, parameters)
 				case (k, Right(parameterized)) => DictMember(k, parameterized)
 			}
-		val sfDictionary: P[ListMap[Token, Parameterized]] =
+		val sfDictionary: P[SfDict] =
 			(dictMember ~ ((ows *> P.char(',') *> ows).with1 *> dictMember).rep0).map((dm, list) =>
 				val x: List[DictMember] = dm :: list
 					//todo: avoid this tupling
 					ListMap.from(x.map((d: DictMember) => Tuple.fromProductTyped(d)))
 		)
+	}
+
+	/**
+	 *
+ 	 * Serialisation implementations for the RFC8941 types as defined in
+	 * [[https://www.rfc-editor.org/rfc/rfc8941.html#section-4.1 §4.1 Serializing Structured Fields]]
+	 * written as a type class so thqt it can easily be extended to give the result with non RFC8941 headers
+	 * and work with different frameworks.
+	 *
+	 * todo: it may be that scalaz's Show class that uses a Cord
+	 **/
+	object Serialise {
+
+		trait Serialise[-T]:
+			extension (t: T)
+			   //may be better if encoded directly to a byte string
+				def canon: String
+
+		given boolSer: Serialise[Boolean] with
+			extension (t: Boolean)
+				def canon: String = if t then "?1" else "?0"
+
+		given byteSer: Serialise[ArraySeq[Byte]] with
+			extension (t: ArraySeq[Byte])
+				def canon: String = ":"+Base64.getEncoder
+					.encodeToString(t.unsafeArray.asInstanceOf[Array[Byte]])
+
+		given tokenSer: Serialise[Token] with
+			extension (t: Token)
+				def canon: String = t.t
+
+		given stringSer: Serialise[String] with
+			extension (t: String)
+				def canon: String = s""""$t""""
+		
+		given numberSer: Serialise[Number] with
+			extension (t: Number)
+				def canon: String = t match
+					case i: IntStr => i.integer
+					case d: DecStr => d.integer + "." + d.dec
+
+
+		
+		//
+		// complex types
+		//
+		given paramSer[A<:Item](using Serialise[A]): Serialise[(Token,A)] with
+			extension (t: (Token,A))
+				def canon: String = ";"+t._1.canon + {t._2 match {
+					case b: Boolean => ""
+					case other => other.canon
+				}}
+
+
+
+
+
+
 	}
 	//
 	//types uses by parser above
@@ -110,11 +168,13 @@ object Rfc8941 {
 	 * So one should narrow the classes or be careful on serialisation, i.e. header construction.
 	 * Note: Unit was added. It Allows us to have empty Item parameters. todo: check it's ok.
 	 */
-	type Item = Number | String | Token | ArraySeq[Byte] | Boolean | Unit
+	type Item = Number | String | Token | ArraySeq[Byte] | Boolean 
 	type Parameter = (Token, Item)
 	type Parameters = ListMap[Token, Item]
 	type SfList = List[Parameterized]
+	type SfDict = ListMap[Token, Parameterized|Parameters]
 
+	def SfDict(entries: (Token,Parameterized|Parameters)*) = ListMap(entries*)
 	/**
 	 * dict-member    = member-key ( parameters / ( "=" member-value ))
 	 * member-value   = sf-item / inner-list
@@ -123,7 +183,7 @@ object Rfc8941 {
 	 * @param values if InnerList with an empty list, then we have "parameters", else we have an inner list
 	 */
 	final
-	case class DictMember(key: Token, values: Parameterized)
+	case class DictMember(key: Token, values: Parameterized|Parameters)
 
 	/** Parameterized Item */
 	final
