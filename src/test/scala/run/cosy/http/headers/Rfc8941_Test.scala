@@ -5,7 +5,9 @@ import cats.parse.Parser.{Expectation, Fail}
 import cats.data.NonEmptyList
 import run.cosy.http.headers.Rfc8941
 import Rfc8941.Parser.{dictMember, sfBinary, sfBoolean, sfDecimal, sfDictionary, sfInteger, sfList, sfNumber, sfString, sfToken}
-import run.cosy.http.headers.Rfc8941.{IList, Param, Params, SfDict}
+import Rfc8941.{IList, Param, Params, SfDict, SfString}
+import Rfc8941.SyntaxHelper._
+import run.cosy.http.WebException
 
 import java.util.Base64
 import scala.collection.immutable.{ArraySeq, ListMap}
@@ -26,7 +28,7 @@ class Rfc8941_Test extends munit.FunSuite {
 	//
 	// test Items
 	//
-	import Rfc8941.{DecStr, IntStr, PItem, Token}
+	import Rfc8941.{SfDec, SfInt, PItem, Token}
 
 	test("test sfBoolean") {
 		assertEquals(sfBoolean.parse("?0"), R(false))
@@ -35,38 +37,80 @@ class Rfc8941_Test extends munit.FunSuite {
 		parseFail(sfBoolean.parse("000"))
 	}
 
+	test("test sfInteger syntax") {
+		assertEquals(SfInt("42").long,42L)
+		assertEquals(SfInt("-42").long,-42L)
+		assertEquals(SfInt(42L).long,42L)
+		intercept[Rfc8941.NumberOutOfBoundsException]{
+			SfInt(("999"*5)+"0")
+		}
+	}
+
 	test("test sfInteger") {
-		assertEquals(sfInteger.parse("42"), R(IntStr("42")))
-		assertEquals(sfInteger.parse("123456789012345"), R(IntStr("123456789012345")))
-		assertEquals(sfInteger.parse("42.5"), R(IntStr("42"), ".5"))
+		assertEquals(sfInteger.parse("42"), R(SfInt("42")))
+		assertEquals(sfInteger.parse("123456789012345"), R(SfInt("123456789012345")))
+		assertEquals(sfInteger.parse("42.5"), R(SfInt("42"), ".5"))
 		parseFailAll(sfInteger.parseAll("123hello"))
 		parseFail(sfInteger.parse("hello"))
 	}
 
+	test("test sfDecimal syntax") {
+		assertEquals(SfDec("42.0").double,42.0)
+		assertEquals(SfDec("-42.01").double,-42.01)
+		assertEquals(SfDec("-42.011").double,-42.011)
+		assertEquals(SfDec("-42.015").double, -42.015)
+		assertEquals(SfDec(42.0015).double, 42.002)
+		intercept[Rfc8941.NumberOutOfBoundsException] {
+			SfDec(SfDec.MAX_VALUE + 1).double
+		}
+		intercept[NumberFormatException] {
+			SfDec("999OO0")
+		}
+		intercept[NumberFormatException] {
+			SfDec(("999"*4)+"0")
+		}
+		intercept[NumberFormatException]{
+			SfDec(("999"*6)+"0")
+		}
+	}
+
+
 	test("test sfDecimal") {
-		assertEquals(sfDecimal.parse("42.0"), R(DecStr("42", "0")))
-		assertEquals(sfDecimal.parse("123456789012.123"), R(DecStr("123456789012", "123")))
-		assertEquals(sfDecimal.parse("42.5"), R(DecStr("42", "5")))
+		assertEquals(sfDecimal.parse("42.0"), R(SfDec("42.0")))
+		assertEquals(sfDecimal.parse("123456789012.123"), R(SfDec("123456789012.123")))
+		assertEquals(sfDecimal.parse("42.5"), R(SfDec("42.5")))
 		parseFail(sfDecimal.parse("123456789012345.123"), "the dot is too far away")
 		parseFail(sfDecimal.parse("123"), "there is not dot")
 	}
 
 	test("test sfNumber") {
-		assertEquals(sfNumber.parse("42.0"), R(DecStr("42", "0")))
-		assertEquals(sfNumber.parse("123456789012.123"), R(DecStr("123456789012", "123")))
-		assertEquals(sfNumber.parse("-123456789012.123"), R(DecStr("-123456789012", "123")))
-		assertEquals(sfNumber.parse("42.5"), R(DecStr("42", "5")))
-		assertEquals(sfNumber.parse("-123456789012345.123"), R(IntStr("-123456789012345"), ".123"))
-		assertEquals(sfNumber.parse("123"), R(IntStr("123")))
-		assertEquals(sfNumber.parse("-123"), R(IntStr("-123")))
+		assertEquals(sfNumber.parse("42.0"), R(SfDec("42.0")))
+		assertEquals(sfNumber.parse("123456789012.123"), R(SfDec("123456789012.123")))
+		assertEquals(sfNumber.parse("-123456789012.123"), R(SfDec("-123456789012.123")))
+		assertEquals(sfNumber.parse("42.5"), R(SfDec("42.5")))
+		assertEquals(sfNumber.parse("-123456789012345.123"), R(SfInt("-123456789012345"), ".123"))
+		assertEquals(sfNumber.parse("123"), R(SfInt("123")))
+		assertEquals(sfNumber.parse("-123"), R(SfInt("-123")))
 		parseFail(sfNumber.parse("a123"), "does not start with digit")
 	}
 
+	test("test sfString syntax") {
+		assertEquals(SfString("hello"),sf"hello")
+		assertEquals(SfString("""hello\""").stringValue,"hello\\")
+		assertEquals(SfString(s"molae=${22+20}"),sf"molae=42")
+		intercept[IllegalArgumentException] {
+			SfString("être")
+		}
+		intercept[IllegalArgumentException] {
+			SfString("	hi")   //no tabs
+		}
+	}
+
 	test("test sfString") {
-		assertEquals(sfString.parse(""""42""""), R("42"))
-		assertEquals(sfString.parse(""""123456789012345""""), R("123456789012345"))
-		assertEquals(sfString.parse(""""a42b""""), R("a42b"))
-		assertEquals(sfString.parse(""""a\"42\\b""""), R("""a"42\b"""))
+		assertEquals(sfString.parse(""""42""""), R(sf"42"))
+		assertEquals(sfString.parse(""""123456789012345""""), R(sf"123456789012345"))
+		assertEquals(sfString.parse(""""a42b""""), R(sf"a42b"))
+		assertEquals(sfString.parse(""""a\"42\\b""""), R(sf"""a"42\b"""))
 		parseFail(sfString.parse(""""123456789012345"""), "no end quote")
 		parseFail(sfString.parse(""""Bahnhofstraße"""), "no german here")
 		parseFailAll(sfString.parseAll("""a"123hello""""), "letter before quote")
@@ -93,7 +137,7 @@ class Rfc8941_Test extends munit.FunSuite {
 		parseFailAll(sfBinary.parseAll(":cHJldGVuZCB0aGlzIGlzIGJpbmFyeSBjb250ZW50Lg"), "must finish with colon")
 		parseFailAll(sfBinary.parseAll(":cHJldGVuZCB0aGlz#IGlzIGJpbmFyeSBjb250ZW50Lg:"), "no hash in the middle")
 	}
-	import Rfc8941.{PItem => PI, Token, DecStr => Dec, IntStr}
+	import Rfc8941.{PItem => PI, Token, SfDec => Dec, SfInt}
 
 	//
 	// test Lists
@@ -114,31 +158,31 @@ class Rfc8941_Test extends munit.FunSuite {
 		)
 		assertEquals(
 			sfList.parse(""""sugar" , "tea",   "rum""""),
-			R(List(PI("sugar"), PI("tea"), PI("rum")))
+			R(List(PI(sf"sugar"), PI(sf"tea"), PI(sf"rum")))
 		)
 		assertEquals(
 			sfList.parse("123.45 , 34.33, 42, 56.789"),
-			R(List(PI(Dec("123","45")), PI(Dec("34","33")), PI(IntStr("42")), PI(Dec("56","789"))))
+			R(List(PI(SfDec("123.45")), PI(SfDec("34.33")), PI(SfInt("42")), PI(SfDec("56.789"))))
 		)
 		assertEquals(
 			sfList.parse("""123.450 , 034.33, 42, foo123/456 , ?0  ,  ?1, "rum", :cafebabe:"""),
-			R(List(PI(Dec("123","450")), PI(Dec("034","33")), PI(IntStr("42")),
-				PI(Token("foo123/456")), PI(false), PI(true), PI("rum"), PI(cafebabe)))
+			R(List(PI(SfDec("123.450")), PI(SfDec("034.33")), PI(SfInt("42")),
+				PI(Token("foo123/456")), PI(false), PI(true), PI(sf"rum"), PI(cafebabe)))
 		)
 		assertEquals(
 			sfList.parse("""123.450 , 42, foo123/456 , ?0, "No/No", :cafebabe:"""),
-			R(List(PI(Dec("123","450")), PI(IntStr("42")),
-				PI(Token("foo123/456")), PI(false), PI("No/No"), PI(cafebabe)))
+			R(List(PI(SfDec("123.450")), PI(SfInt("42")),
+				PI(Token("foo123/456")), PI(false), PI(sf"No/No"), PI(cafebabe)))
 		)
 		assertEquals(
 			sfList.parse(
 				"""1234.750;  n=4;f=3 , 42;magic="h2g2", foo123/456;lang=en ,
 				  |   ?0;sleep=?1, "No/No", :cafebabe:;enc=unicode""".stripMargin.filter(_ != '\n').toString),
-			R(List(PI(Dec("1234","750"),ListMap(Token("n")->IntStr("4"),Token("f")->IntStr("3"))),
-				PI(IntStr("42"),ListMap(Token("magic")->"h2g2")),
+			R(List(PI(SfDec("1234.750"),ListMap(Token("n")->SfInt("4"),Token("f")->SfInt("3"))),
+				PI(SfInt("42"),ListMap(Token("magic")->sf"h2g2")),
 				PI(Token("foo123/456"),ListMap(Token("lang")->Token("en"))),
 				PI(false,ListMap(Token("sleep")->true)),
-				PI("No/No"),
+				PI(sf"No/No"),
 				PI(cafebabe,ListMap(Token("enc") -> Token("unicode")))))
 		)
 	}
@@ -152,17 +196,17 @@ class Rfc8941_Test extends munit.FunSuite {
 		assertEquals(
 			sfList.parse("""("foo" "bar"), ("baz"), ("bat" "one"), ()"""),
 			R(List(
-				IL(PI("foo"), PI("bar"))(),
-				IL(PI("baz"))(),
-				IL(PI("bat"), PI("one"))(),
+				IL(PI(sf"foo"), PI(sf"bar"))(),
+				IL(PI(sf"baz"))(),
+				IL(PI(sf"bat"), PI(sf"one"))(),
 				IL()()
 			))
 		)
 		assertEquals(
 			sfList.parse("""("foo"; a=1;b=2);lvl=5, ("bar" "baz");lvl=1"""),
 			R(List(
-				IL(List(PI("foo",ListMap(Token("a")->IntStr("1"),Token("b")->IntStr("2")))),ListMap(Token("lvl")->IntStr("5"))),
-				IL(List(PI("bar"),PI("baz")),ListMap(Token("lvl")->IntStr("1")))
+				IL(List(PI(sf"foo",ListMap(Token("a")->SfInt("1"),Token("b")->SfInt("2")))),ListMap(Token("lvl")->SfInt("5"))),
+				IL(List(PI(sf"bar"),PI(sf"baz")),ListMap(Token("lvl")->SfInt("1")))
 			))
 		)
 	}
@@ -172,7 +216,7 @@ class Rfc8941_Test extends munit.FunSuite {
 	test("dict-member") {
 		assertEquals(
 			dictMember.parse("""en="Applepie""""),
-			R(DictMember(Token("en"),PI("Applepie")))
+			R(DictMember(Token("en"),PI(sf"Applepie")))
 		)
 	}
 
@@ -180,7 +224,7 @@ class Rfc8941_Test extends munit.FunSuite {
 		assertEquals(
 			sfDictionary.parse("""en="Applepie", da=:cafebabe:"""),
 			R(ListMap(
-				Token("en") -> PI("Applepie"),
+				Token("en") -> PI(sf"Applepie"),
 				Token("da") -> PI(cafebabe)
 			)))
 		assertEquals(
@@ -193,10 +237,10 @@ class Rfc8941_Test extends munit.FunSuite {
 		assertEquals(
 			sfDictionary.parse("""a=(1 2), b=3, c=4;aa=bb, d=(5 6);valid"""),
 			R(SfDict(
-				Token("a") -> IL(PI(IntStr("1")),PI(IntStr("2")))(),
-				Token("b") -> PI(IntStr("3"))(),
-				Token("c") -> PI(IntStr("4"))(Token("aa")->Token("bb")),
-				Token("d") -> IL(PI(IntStr("5")),PI(IntStr("6")))(Token("valid")->true)
+				Token("a") -> IL(PI(SfInt("1")),PI(SfInt("2")))(),
+				Token("b") -> PI(SfInt("3"))(),
+				Token("c") -> PI(SfInt("4"))(Token("aa")->Token("bb")),
+				Token("d") -> IL(PI(SfInt("5")),PI(SfInt("6")))(Token("valid")->true)
 			)))
 	}
 	
@@ -205,6 +249,7 @@ class Rfc8941_Test extends munit.FunSuite {
 	test("sfDictionary with Signing Http Messages headers") {
 		//here we start playing with making the syntax easier to work with by using implicit conversions
 		import scala.language.implicitConversions
+
 
 		val `ex§4.1` = """sig1=("@request-target" "host" "date"   "cache-control" \
 						|      "x-empty-header" "x-example"); keyid="test-key-a"; \
@@ -215,13 +260,13 @@ class Rfc8941_Test extends munit.FunSuite {
 			sfDictionary.parse(`ex§4.1`),
 			R(ListMap(
 				Token("sig1") -> IL(
-					"@request-target","host","date","cache-control",
-					"x-empty-header", "x-example"
+					sf"@request-target",sf"host",sf"date",sf"cache-control",
+					sf"x-empty-header", sf"x-example"
 				)(
-					Token("keyid")->"test-key-a",
-					Token("alg")->"rsa-pss-sha512",
-					Token("created")->IntStr("1402170695"),
-					Token("expires")->IntStr("1402170995")
+					Token("keyid")-> sf"test-key-a",
+					Token("alg")-> sf"rsa-pss-sha512",
+					Token("created")-> SfInt("1402170695"),
+					Token("expires")-> SfInt("1402170995")
 				)
 			))
 		)
@@ -253,9 +298,9 @@ class Rfc8941_Test extends munit.FunSuite {
 		assertEquals(true.canon, "?1")
 		assertEquals(false.canon, "?0")
 		assertEquals(Token("*ab/d").canon, "*ab/d")
-		assertEquals(IntStr("234").canon, "234")
-		assertEquals("hello".canon, """"hello"""")
-		assertEquals(DecStr("1024","48").canon,"1024.48")
+		assertEquals(SfInt("234").canon, "234")
+		assertEquals(sf"hello".canon, """"hello"""")
+		assertEquals(SfDec("1024.48").canon,"1024.48")
 		assertEquals(cafebabe.canon,":cafebabe:")
 		assertEquals(cafedead.canon,":cafedead:")
 	}
@@ -264,25 +309,25 @@ class Rfc8941_Test extends munit.FunSuite {
 		assertEquals(Param("fun",true).canon,";fun")
 		assertEquals(Params(Tk("fun")->true).canon,";fun")
 		assertEquals(
-			Params(Tk("foo")->true, Tk("bar")->IntStr("42")).canon,
+			Params(Tk("foo")->true, Tk("bar")->SfInt("42")).canon,
 			";foo;bar=42")
 		assertEquals(
-			Params(Tk("foo")->true, Tk("bar")->IntStr("42"),Tk("baz")->"hello").canon,
+			Params(Tk("foo")->true, Tk("bar")->SfInt("42"),Tk("baz")->sf"hello").canon,
 			""";foo;bar=42;baz="hello"""")
 		assertEquals(
 			Params(Tk("keyid")->cafebabe).canon,
 			";keyid=:cafebabe:"
 		)
 		assertEquals(
-			PItem(Tk("*foo"))(Tk("age")->IntStr("33")).canon,
+			PItem(Tk("*foo"))(Tk("age")->SfInt("33")).canon,
 			"*foo;age=33"
 		)
 		assertEquals(
-			PItem(DecStr("99","999"))(Tk("discount")-> DecStr("0","2")).canon,
+			PItem(SfDec("99.999"))(Tk("discount")-> SfDec("0.2")).canon,
 			"99.999;discount=0.2"
 		)
 		assertEquals(
-			PItem(cafebabe)(Tk("enc")-> "utf8").canon,
+			PItem(cafebabe)(Tk("enc")-> sf"utf8").canon,
 			""":cafebabe:;enc="utf8""""
 		)
 	}
@@ -294,14 +339,14 @@ class Rfc8941_Test extends munit.FunSuite {
 		// but whitespaces between attributes have been removed as per
 		// issue: https://github.com/httpwg/http-extensions/issues/1456
 		assertEquals(
-			IList("@request-target", "host", "date","cache-control","x-empty-header", "x-example",
-				PItem("x-dictionary")(Param("key",Tk("b"))),
-				PItem("x-dictionary")(Param("key",Tk("a"))),
-				PItem("x-list")(Param("prefix",IntStr("3"))))(
-				Param("keyid","test-key-a"),
-				Param("alg","rsa-pss-sha512"),
-				Param("created",IntStr("1402170695")),
-				Param("expires",IntStr("1402170995")),
+			IList(sf"@request-target", sf"host", sf"date",sf"cache-control",sf"x-empty-header", sf"x-example",
+				PItem(sf"x-dictionary")(Param("key",Tk("b"))),
+				PItem(sf"x-dictionary")(Param("key",Tk("a"))),
+				PItem(sf"x-list")(Param("prefix",SfInt("3"))))(
+				Param("keyid",sf"test-key-a"),
+				Param("alg",sf"rsa-pss-sha512"),
+				Param("created",SfInt("1402170695")),
+				Param("expires",SfInt("1402170995")),
 			).canon,
 			"""("@request-target" "host" "date" "cache-control" \
 			  |   "x-empty-header" "x-example" "x-dictionary";key=b \
@@ -324,13 +369,13 @@ class Rfc8941_Test extends munit.FunSuite {
 		assertEquals(
 			SfDict(
 				Token("sig1") -> IL(
-					"@request-target","host","date","cache-control",
-					"x-empty-header", "x-example"
+					sf"@request-target",sf"host",sf"date",sf"cache-control",
+					sf"x-empty-header", sf"x-example"
 				)(
-					Token("keyid")->"test-key-a",
-					Token("alg")->"rsa-pss-sha512",
-					Token("created")->IntStr("1402170695"),
-					Token("expires")->IntStr("1402170995")
+					Token("keyid")-> sf"test-key-a",
+					Token("alg")-> sf"rsa-pss-sha512",
+					Token("created")->SfInt("1402170695"),
+					Token("expires")->SfInt("1402170995")
 				)
 			).canon,
 			`ex§4.1`

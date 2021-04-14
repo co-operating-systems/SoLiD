@@ -12,7 +12,7 @@ import java.time.Instant
 import scala.collection.immutable.ListMap
 import scala.util.{Failure, Success, Try}
 import run.cosy.http.headers.Rfc8941
-import run.cosy.http.headers.Rfc8941.{IntStr, PItem, Token}
+import run.cosy.http.headers.Rfc8941.{SfInt, PItem, Token, SfString}
 
 import scala.collection.immutable
 
@@ -73,21 +73,22 @@ case class SigInput(headers: Seq[HeaderSelector], att: SigAttributes) {
  **/
 class SigAttributes(keyId: String, params: Rfc8941.Params) {
 	//for both created and expires we return the time only if the types are correct, otherwise we ignore.
-	def created: Option[Long] = params.get(Token("created")).collect{case IntStr(num) => num.toLong}
-	def expires: Option[Long] = params.get(Token("expires")).collect{case IntStr(num) => num.toLong}
+	def created: Option[Long] = params.get(Token("created")).collect{case num: SfInt => num.long}
+	def expires: Option[Long] = params.get(Token("expires")).collect{case num: SfInt => num.long}
 	override def toString(): String =  ???
 }
 
 object SigInput {
 	val supported: Map[String, HeaderName] =  HeaderName.values.map(hn => (hn.toString,hn)).toMap
-	
+	val hs2019 = SfString("hs2019")
+
 	def unapply(iList: Rfc8941.IList): Option[SigInput] = {
 		val hdrs: List[HeaderSelector] = iList.items.map{ case PItem(item,params) =>
 			item match
 			case header: String => supported.get(header).map{ hn =>
 				val ip: immutable.Iterable[Selector] = params.map{
 					case (Token("key"),Token(k)) => KeySelector(k)
-					case (Token("prefix"), IntStr(num)) => PrefixSelector(num.toInt)
+					case (Token("prefix"), num: SfInt) => PrefixSelector(num)
 					case _ => unsupported
 				}
 				if ip.exists(_ == unsupported) then UnimplementedSelector
@@ -98,9 +99,9 @@ object SigInput {
 		if hdrs.contains(UnimplementedSelector) then None
 		else iList.params.map{
 			case (Token("keyid"),id: String) => ???
-			case (Token("alg"), "hs2019") => ???
-			case (Token("created"), IntStr(t0)) => ???
-			case (Token("expires"), IntStr(t1)) => ???
+			case (Token("alg"), hs2019 ) => ???
+			case (Token("created"), t0: SfInt) => ???
+			case (Token("expires"), t1: SfInt) => ???
 			case _ =>  ???
 		}
 		//this seems too strict. What if there are more attributes in the message received on the signature?
@@ -138,7 +139,7 @@ enum HeaderName(val special: Boolean = false):
 
 sealed trait Selector
 case class KeySelector(key: String) extends Selector
-case class PrefixSelector(first: Int) extends Selector
+case class PrefixSelector(first: SfInt) extends Selector
 object unsupported extends Selector
 
 case class SigVerificationData(pubKey: PublicKey, sig: Signature) {
