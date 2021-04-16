@@ -24,7 +24,7 @@ object Rfc8941 {
 	/** SFInt's cover a subspace of Java Longs.
 	 * An Opaque type would not do, as these need to be pattern matched.
 	 * Only the object constructor can build these */
-	sealed abstract case class SfInt private(long: Long)
+	final case class SfInt private(long: Long) extends AnyVal
 
 	object SfInt:
 		val MAX_VALUE: Long = 999_999_999_999_999
@@ -33,7 +33,7 @@ object Rfc8941 {
 		/** We throw a stackfree exception. Calling code can wrap in Try. */
 		@throws[NumberOutOfBoundsException]
 		def apply(long: Long): SfInt =
-			if long <= MAX_VALUE && long >= MIN_VALUE then new SfInt(long){}
+			if long <= MAX_VALUE && long >= MIN_VALUE then new SfInt(long)
 			else throw NumberOutOfBoundsException(long)
 
 		@throws[NumberOutOfBoundsException]
@@ -41,11 +41,11 @@ object Rfc8941 {
 		def apply(longStr: String): SfInt = apply(longStr.toLong)
 
 		//no need to check bounds if parsed by parser below
-		private[Rfc8941] def unsafeParsed(longStr: String): SfInt = new SfInt(longStr.toLong){}
+		private[Rfc8941] def unsafeParsed(longStr: String): SfInt = new SfInt(longStr.toLong)
 	end SfInt
 
 	/* https://www.rfc-editor.org/rfc/rfc8941.html#ser-decimal */
-	sealed abstract case class SfDec private(double: Double)
+	final case class SfDec private(double: Double) extends AnyVal
 
 	object SfDec :
 		val MAX_VALUE: Double = 999_999_999_999.999
@@ -55,7 +55,7 @@ object Rfc8941 {
 		@throws[NumberOutOfBoundsException]
 		def apply(d: Double): SfDec =
 			if d <= MAX_VALUE && d >= MIN_VALUE then {
-				new SfDec(BigDecimal(d).setScale(3, BigDecimal.RoundingMode.HALF_EVEN).doubleValue){}
+				new SfDec(BigDecimal(d).setScale(3, BigDecimal.RoundingMode.HALF_EVEN).doubleValue)
 			} else throw NumberOutOfBoundsException(d)
 
 		@throws[NumberFormatException]
@@ -66,14 +66,14 @@ object Rfc8941 {
 
 		//no need to check bounds if parsed by parser below
 		private[Rfc8941] def unsafeParsed(int: String, fract: String): SfDec =
-			new SfDec(BigDecimal(int+"."+fract).setScale(3, BigDecimal.RoundingMode.HALF_EVEN).doubleValue){}
+			new SfDec(BigDecimal(int+"."+fract).setScale(3, BigDecimal.RoundingMode.HALF_EVEN).doubleValue)
 	end SfDec
 
 	/**
 	 * class has to be abstract to remove the `copy` operation which would allow objects
 	 * outside this package to create illegal values.
 	 **/
-	sealed abstract case class SfString private(asciiStr: String):
+	final case class SfString private(asciiStr: String) extends AnyVal:
 		/** the string formatted for inclusion in Rfc8941 output with surrounding "..." and escaped \ and " */
 		def formattedString: String = {
 			import SfString.bs
@@ -93,14 +93,14 @@ object Rfc8941 {
 		val bs = '\\'
 		@throws[IllegalArgumentException]
 		def apply(str: String): SfString =
-			if str.forall(isAsciiChar) then new SfString(str){}
+			if str.forall(isAsciiChar) then new SfString(str)
 			else throw new IllegalArgumentException(s"$str<<< contains non ascii chars ")
 
-		private[Rfc8941] def unsafeParsed(asciiStr: List[Char]): SfString = new SfString(asciiStr.mkString){}
+		private[Rfc8941] def unsafeParsed(asciiStr: List[Char]): SfString = new SfString(asciiStr.mkString)
 	end SfString
 
 	// class is abstract to remove copy operation
-	sealed abstract case class Token private(t: String)
+	final case class Token private(t: String) extends AnyVal
 
 	object Token:
 		@throws[ParsingException]
@@ -108,10 +108,10 @@ object Rfc8941 {
 			case Right(value) => value
 			case Left(err) => throw ParsingException(s"error paring token $t",s"failed at offset ${err.failedAtOffset}")
 
-		private[Rfc8941] def unsafeParsed(name: String) = new Token(name){}
+		private[Rfc8941] def unsafeParsed(name: String) = new Token(name)
 	end Token
 
-	sealed trait Paramed
+	sealed trait Parameterized
 
 	/**
 	 * see [[https://www.rfc-editor.org/rfc/rfc8941.html#section-3.3 §3.3 Items]] of RFC8941.
@@ -119,12 +119,12 @@ object Rfc8941 {
 	type Item = SfInt | SfDec | SfString | Token | ArraySeq[Byte] | Boolean
 	type Param = (Token, Item)
 	type Params = ListMap[Token, Item]
-	type SfList = List[Paramed]
-	type SfDict = ListMap[Token, Paramed]
+	type SfList = List[Parameterized]
+	type SfDict = ListMap[Token, Parameterized]
 
 	def Param(tk: String, i: Item): Param = (Token(tk),i)
 	def Params(ps: Param*): Params = ListMap(ps*)
-	def SfDict(entries: (Token,Paramed)*) = ListMap(entries*)
+	def SfDict(entries: (Token,Parameterized)*) = ListMap(entries*)
 	/**
 	 * dict-member    = member-key ( parameters / ( "=" member-value ))
 	 * member-value   = sf-item / inner-list
@@ -133,18 +133,18 @@ object Rfc8941 {
 	 * @param values if InnerList with an empty list, then we have "parameters", else we have an inner list
 	 */
 	final
-	case class DictMember(key: Token, values: Paramed)
+	case class DictMember(key: Token, values: Parameterized)
 
 	/** Parameterized Item */
 	final
-	case class PItem(item: Item, params: Params) extends Paramed
+	case class PItem(item: Item, params: Params) extends Parameterized
 
 	object PItem:
 		def apply(item: Item): PItem = new PItem(item,ListMap())
 		def apply(item: Item)(params: Param*): PItem = new PItem(item,ListMap(params*))
 
 	/** Inner List */
-	final case class IList(items: List[PItem], params: Params) extends Paramed
+	final case class IList(items: List[PItem], params: Params) extends Parameterized
 
 	object IList:
 		def apply(items: PItem*)(params: Param*): IList = new IList(items.toList,ListMap(params*))
@@ -241,12 +241,12 @@ object Rfc8941 {
 					case (None, params) => IList(List(), params)
 				}
 		}
-		val listMember: P[Paramed] = (sfItem | innerList)
+		val listMember: P[Parameterized] = (sfItem | innerList)
 
 		val sfList: P[SfList] =
 			(listMember ~ ((ows *> P.char(',') *> ows).void.with1 *> listMember).rep0).map((p, lp) => p :: lp)
 
-		val memberValue: P[Paramed] = (sfItem | innerList)
+		val memberValue: P[Parameterized] = (sfItem | innerList)
 		//note: we have to go with parsing `=` first as parameters always returns an answer.
 		val dictMember: P[DictMember] = (key ~ (P.char('=') *> memberValue).eitherOr(parameters))
 			.map {

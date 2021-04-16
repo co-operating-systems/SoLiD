@@ -65,9 +65,9 @@ object Dependencies {
 	val catsParse =  "org.typelevel" %% "cats-parse" % "0.3.2"
 
 
-	def dottyCompatLibs = (Seq(scalaz, alpakka, catsParse) ++ akka ++ akkaTest ++ banana).map( o =>
-		o cross CrossVersion.for3Use2_13
-	)
+
+	def dottyCompatLibs = (Seq(scalaz, alpakka, catsParse) ++ akka ++ akkaTest ++ banana)
+		.map( o => o cross CrossVersion.for3Use2_13)
 
 	//
 	// Scala 3 libs
