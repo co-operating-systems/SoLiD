@@ -12,7 +12,7 @@ import java.time.Instant
 import scala.collection.immutable.ListMap
 import scala.util.{Failure, Success, Try}
 import run.cosy.http.headers.Rfc8941
-import run.cosy.http.headers.Rfc8941.{SfInt, PItem, Token, SfString}
+import Rfc8941.{IList, Item, PItem, SfInt, SfList, SfString, Token, SfDict}
 
 import scala.collection.immutable
 
@@ -22,49 +22,78 @@ import scala.collection.immutable
  *  since the only algorithm now is "hs2019" we don't allow anything else to be set
  * @param text
  */
-final case class `Signature-Input`(sig: ListMap[Rfc8941.Token,SigInput]) extends BetterCustomHeader[`Signature-Input`]:
+final case class `Signature-Input`(sig: SigInputs) extends BetterCustomHeader[`Signature-Input`]:
 	override def renderInRequests = true
 	override def renderInResponses = false
 	override val companion = `Signature-Input`
-	override def value: String = sig.values.mkString(", ")
+	override def value: String = sig.canonical
 
 
 object `Signature-Input` extends BetterCustomHeaderCompanion[`Signature-Input`]:
 	override val name = "Signature-Input"
 
-	//override try to generalise later
-	def parse(value: String): Try[ListMap[Rfc8941.Token,SigInput]] =
-		val sig: Try[ListMap[Rfc8941.Token, SigInput]] =
-			Rfc8941.Parser.sfDictionary.parseAll(value) match {
-				case Left(e) => Failure(HTTPHeaderParseException(e,value))
-				case Right(lm) =>
-					val x = lm.collect{
-						case (sigName, _) => 
-						???
-					}
-					??? //Success(x)
-			}
-		//		.left.map((e: Parser.Error) => HTTPHeaderParseException(e,value)).toTry
-		???
+	def parse(value: String): Try[SigInputs] =
+		Rfc8941.Parser.sfDictionary.parseAll(value) match
+			case Left(e) => Failure(HTTPHeaderParseException(e,value))
+			case Right(lm) => Success(SigInputs.filterValid(lm))
 
 	//can an unapply return a Try in scala3
 	//override - try to generalise later
-	def unapply(h: HttpHeader): Option[SigInput] = h match {
+	def unapply(h: HttpHeader): Option[SigInputs] = h match {
 		case _: (RawHeader | CustomHeader) =>
 			if (h.lowercaseName == lowercaseName) ??? else ??? //parse(h.value.asEncoded).toOption else None
 		case _ => None
 	}
 end `Signature-Input`
 
-case class SigInput(headers: Seq[HeaderSelector], att: SigAttributes) {
+/**
+ * A Signature-Input is an SfDictionary whose values are all Internal Lists
+ * We don't here verify the structure of this Ilist at this point leaving it
+ * to the application layer
+ *
+ * @param value
+ * @return
+ */
+case class SigInputs(si: ListMap[Rfc8941.Token,SigInput]) {
+	import Rfc8941.Serialise._
 
-	override def toString: String = s"""($headersString); $att"""
-	def headersString: String = headers.map(name=>s""""$name"""").mkString(" ")
+	def canonical: String = ??? //(si.asInstanceOf[SfDict]).canon
 
-	private def dateString: String =
-		val cs = att.created.map(c=> s"; created=$c").getOrElse("")
-		val ts = att.expires.map(t=> s"; expires=$t").getOrElse("")
-		cs ++ ts
+}
+
+object SigInputs {
+	import Rfc8941.SfString
+	/**
+	 * Filter out the inputs that this framework does not accept.
+	 * Since this may change with implementations, this should really
+	 * be a function provided in a trait provided by the library doing the
+	 * verification, so that it can evolve independently of the Http Header
+	 * framework.
+	 * Todo: make this independent as described above! (when it functions)
+	 **/
+	def filterValid(lm: SfDict): SigInputs = SigInputs(lm.collect{
+		case (sigName, il: IList) if valid(il) => (sigName,SigInput(il))
+	})
+	/**
+	 * A Valid SigInpu IList has a Interal list of parameterless Strings (We don't support those just yet)
+	 * and the list has attributes including a keyid, and a protocol. Can have more.
+	 **/
+	def valid(il: IList): Boolean =
+		val headersOk = il.items.forall{ itm =>
+			val Empty = ListMap.empty[Token,Item]
+			itm match
+				case PItem(SfString(hdr),Empty) if acceptedHeadersMap.contains(hdr) => true
+				case _ => false
+		}
+		val (keyIdExists, algoExists) = il.params.foldRight((false,false)){ case (param,(keyIdE, algoE)) =>
+			param match
+				case (Token("keyid"),SfString(id)) if id.startsWith("<") && id.endsWith(">") => (true,algoE)
+				case (Token("alg"),SfString("hs2019")) => (keyIdE,true)
+				case _ => (keyIdE,algoE)
+		}
+		headersOk && keyIdExists && algoExists
+
+	val acceptedHeadersMap = HeaderName.values.toSeq.map(hn=> (hn.toString,hn)).toMap
 }
 
 /**
@@ -72,10 +101,15 @@ case class SigInput(headers: Seq[HeaderSelector], att: SigAttributes) {
  * but we requure keyId to be present.
  **/
 class SigAttributes(keyId: String, params: Rfc8941.Params) {
+	import Rfc8941.given
 	//for both created and expires we return the time only if the types are correct, otherwise we ignore.
 	def created: Option[Long] = params.get(Token("created")).collect{case num: SfInt => num.long}
 	def expires: Option[Long] = params.get(Token("expires")).collect{case num: SfInt => num.long}
 	override def toString(): String =  ???
+}
+
+case class SigInput(il: IList) {
+	def headers = ??? //il.items.map(_.item.)
 }
 
 object SigInput {

@@ -9,6 +9,7 @@ import java.math.{MathContext, RoundingMode}
 import java.nio.charset.{Charset, StandardCharsets}
 import java.util.Base64
 import scala.collection.immutable.{ArraySeq, ListMap}
+import scala.reflect.TypeTest
 import scala.util.{Failure, Success, Try}
 
 
@@ -23,15 +24,16 @@ object Rfc8941 {
 	/** SFInt's cover a subspace of Java Longs.
 	 * An Opaque type would not do, as these need to be pattern matched.
 	 * Only the object constructor can build these */
-	case class SfInt private(long: Long)
+	sealed abstract case class SfInt private(long: Long)
 
 	object SfInt:
 		val MAX_VALUE: Long = 999_999_999_999_999
 		val MIN_VALUE: Long = -MAX_VALUE
 
+		/** We throw a stackfree exception. Calling code can wrap in Try. */
 		@throws[NumberOutOfBoundsException]
 		def apply(long: Long): SfInt =
-			if long <= MAX_VALUE && long >= MIN_VALUE then new SfInt(long)
+			if long <= MAX_VALUE && long >= MIN_VALUE then new SfInt(long){}
 			else throw NumberOutOfBoundsException(long)
 
 		@throws[NumberOutOfBoundsException]
@@ -39,12 +41,11 @@ object Rfc8941 {
 		def apply(longStr: String): SfInt = apply(longStr.toLong)
 
 		//no need to check bounds if parsed by parser below
-		private[Rfc8941] def unsafeParsed(longStr: String): SfInt = new SfInt(longStr.toLong)
+		private[Rfc8941] def unsafeParsed(longStr: String): SfInt = new SfInt(longStr.toLong){}
 	end SfInt
 
-
 	/* https://www.rfc-editor.org/rfc/rfc8941.html#ser-decimal */
-	final case class SfDec private(double: Double)
+	sealed abstract case class SfDec private(double: Double)
 
 	object SfDec :
 		val MAX_VALUE: Double = 999_999_999_999.999
@@ -54,7 +55,7 @@ object Rfc8941 {
 		@throws[NumberOutOfBoundsException]
 		def apply(d: Double): SfDec =
 			if d <= MAX_VALUE && d >= MIN_VALUE then {
-				new SfDec(BigDecimal(d).setScale(3, BigDecimal.RoundingMode.HALF_EVEN).doubleValue)
+				new SfDec(BigDecimal(d).setScale(3, BigDecimal.RoundingMode.HALF_EVEN).doubleValue){}
 			} else throw NumberOutOfBoundsException(d)
 
 		@throws[NumberFormatException]
@@ -65,13 +66,14 @@ object Rfc8941 {
 
 		//no need to check bounds if parsed by parser below
 		private[Rfc8941] def unsafeParsed(int: String, fract: String): SfDec =
-			SfDec(BigDecimal(int+"."+fract).setScale(3, BigDecimal.RoundingMode.HALF_EVEN).doubleValue)
+			new SfDec(BigDecimal(int+"."+fract).setScale(3, BigDecimal.RoundingMode.HALF_EVEN).doubleValue){}
 	end SfDec
 
-	final case class SfString private(asciiStr: Seq[Char]):
-		/** The string content */
-		def stringValue: String = asciiStr.mkString
-		override def toString: String = stringValue
+	/**
+	 * class has to be abstract to remove the `copy` operation which would allow objects
+	 * outside this package to create illegal values.
+	 **/
+	sealed abstract case class SfString private(asciiStr: String):
 		/** the string formatted for inclusion in Rfc8941 output with surrounding "..." and escaped \ and " */
 		def formattedString: String = {
 			import SfString.bs
@@ -91,23 +93,23 @@ object Rfc8941 {
 		val bs = '\\'
 		@throws[IllegalArgumentException]
 		def apply(str: String): SfString =
-			if str.forall(isAsciiChar) then new SfString(str)
+			if str.forall(isAsciiChar) then new SfString(str){}
 			else throw new IllegalArgumentException(s"$str<<< contains non ascii chars ")
 
-		private[Rfc8941] def unsafeParsed(asciiStr: List[Char]): SfString = new SfString(asciiStr)
+		private[Rfc8941] def unsafeParsed(asciiStr: List[Char]): SfString = new SfString(asciiStr.mkString){}
 	end SfString
 
-	final case class Token private(t: String)
+	// class is abstract to remove copy operation
+	sealed abstract case class Token private(t: String)
 
 	object Token:
 		@throws[ParsingException]
-		def apply(t: String): Token = Parser.sfToken.parseAll(t) match {
+		def apply(t: String): Token = Parser.sfToken.parseAll(t) match
 			case Right(value) => value
 			case Left(err) => throw ParsingException(s"error paring token $t",s"failed at offset ${err.failedAtOffset}")
-		}
-		private[Rfc8941] def unsafeParsed(name: String) = new Token(name)
-	end Token
 
+		private[Rfc8941] def unsafeParsed(name: String) = new Token(name){}
+	end Token
 
 	sealed trait Paramed
 

@@ -5,7 +5,7 @@ import cats.parse.Parser.{Expectation, Fail}
 import cats.data.NonEmptyList
 import run.cosy.http.headers.Rfc8941
 import Rfc8941.Parser.{dictMember, sfBinary, sfBoolean, sfDecimal, sfDictionary, sfInteger, sfList, sfNumber, sfString, sfToken}
-import Rfc8941.{IList, Param, Params, SfDict, SfString}
+import Rfc8941._
 import Rfc8941.SyntaxHelper._
 import run.cosy.http.WebException
 
@@ -28,7 +28,6 @@ class Rfc8941_Test extends munit.FunSuite {
 	//
 	// test Items
 	//
-	import Rfc8941.{SfDec, SfInt, PItem, Token}
 
 	test("test sfBoolean") {
 		assertEquals(sfBoolean.parse("?0"), R(false))
@@ -96,7 +95,7 @@ class Rfc8941_Test extends munit.FunSuite {
 
 	test("test sfString syntax") {
 		assertEquals(SfString("hello"),sf"hello")
-		assertEquals(SfString("""hello\""").stringValue,"hello\\")
+		assertEquals(SfString("""hello\"""),sf"""hello\""")
 		assertEquals(SfString(s"molae=${22+20}"),sf"molae=42")
 		intercept[IllegalArgumentException] {
 			SfString("être")
@@ -115,6 +114,12 @@ class Rfc8941_Test extends munit.FunSuite {
 		parseFail(sfString.parse(""""Bahnhofstraße"""), "no german here")
 		parseFailAll(sfString.parseAll("""a"123hello""""), "letter before quote")
 		parseFail(sfString.parse(""" "hello" """), "space before quote")
+	}
+
+	test("test sfToken syntax") {
+//		intercept[IllegalArgumentException] {
+//			Token("NoUpperCase")
+//		}
 	}
 
 	test("test sfToken") {
@@ -381,5 +386,30 @@ class Rfc8941_Test extends munit.FunSuite {
 			`ex§4.1`
 		)
 	}
-	
+	//see https://github.com/solid/specification/issues/255
+	test("testing WAC-Allow header ideas") {
+		import scala.language.implicitConversions
+		assertEquals(
+			Rfc8941.Parser.sfDictionary.parseAll("""user="read write", public="read""""),
+			RA(SfDict(
+				Token("user") -> PItem(sf"read write"),
+				Token("public") -> PItem(sf"read")
+			))
+		)
+		assertEquals(
+			Rfc8941.Parser.sfDictionary.parseAll("""user=("read" "write"), public=("read")"""),
+			RA(SfDict(
+				Token("user") -> IList(sf"read", sf"write")(),
+				Token("public") -> IList(sf"read")()
+			))
+		)
+		assertEquals(
+			Rfc8941.Parser.sfDictionary.parseAll("""user=(read write), public=(read)"""),
+			RA(SfDict(
+				Token("user") -> IList(Token("read"), Token("write"))(),
+				Token("public") -> IList(Token("read"))()
+			))
+		)
+	}
+
 }
