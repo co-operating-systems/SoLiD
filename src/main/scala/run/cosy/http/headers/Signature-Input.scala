@@ -96,18 +96,6 @@ object SigInputs {
 	val acceptedHeadersMap = HeaderName.values.toSeq.map(hn=> (hn.toString,hn)).toMap
 }
 
-/**
- * We lump the parameters together as there may be some we can't interpret,
- * but we requure keyId to be present.
- **/
-class SigAttributes(keyId: String, params: Rfc8941.Params) {
-	import Rfc8941.given
-	//for both created and expires we return the time only if the types are correct, otherwise we ignore.
-	def created: Option[Long] = params.get(Token("created")).collect{case num: SfInt => num.long}
-	def expires: Option[Long] = params.get(Token("expires")).collect{case num: SfInt => num.long}
-	override def toString(): String =  ???
-}
-
 case class SigInput(il: IList) {
 	def headers = ??? //il.items.map(_.item.)
 }
@@ -149,6 +137,20 @@ object SigInput {
 //		}
 }
 
+
+/**
+ * We lump the parameters together as there may be some we can't interpret,
+ * but we requure keyId to be present.
+ **/
+class SigAttributes(keyId: String, params: Rfc8941.Params) {
+	import Rfc8941.given
+	//for both created and expires we return the time only if the types are correct, otherwise we ignore.
+	def created: Option[Long] = params.get(Token("created")).collect{case num: SfInt => num.long}
+	def expires: Option[Long] = params.get(Token("expires")).collect{case num: SfInt => num.long}
+	override def toString(): String =  ???
+}
+
+
 /**
  * Headers can have attributes used to determine
  *  + [[https://tools.ietf.org/html/draft-ietf-httpbis-message-signatures-03#section-2.2 Disctionary Structured Field Members]]
@@ -169,7 +171,7 @@ enum HeaderName(val special: Boolean = false):
 	case `@request-target` extends HeaderName(true)
 	case `@signature-params` extends HeaderName(true)
 	case `@unimplemented` extends HeaderName(true)
-	case date, server, `cache-control`
+	case date, server, host, `cache-control`
 
 sealed trait Selector
 case class KeySelector(key: String) extends Selector

@@ -100,7 +100,7 @@ object Rfc8941 {
 	end SfString
 
 	// class is abstract to remove copy operation
-	final case class Token private(val t: String) extends AnyVal
+	final case class Token private(t: String) extends AnyVal
 
 	object Token:
 		@throws[ParsingException]

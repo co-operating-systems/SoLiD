@@ -23,14 +23,14 @@ class CustomMediaTypesSpec extends AkkaSpec with ScalaFutures
 		"check RDFMedia types exist and if they differ in casing" in {
 			val set = RDFMediaTypes.all
 
-			set.contains(MediaType.parse("application/rdf+xml").right.get) should ===(true)
-			set.contains(MediaType.parse("application/RDF+XML").right.get) should ===(true)
-			set.contains(MediaType.parse("application/ld+json").right.get) should ===(true)
-			set.contains(MediaType.parse("application/ld+JSON").right.get) should ===(true)
-			set.contains(MediaType.parse("application/trig").right.get) should ===(true)
-			set.contains(MediaType.parse("application/trix").right.get) should ===(true)
-			set.contains(MediaType.parse("text/turtle").right.get) should ===(true)
-			set.contains(MediaType.parse("text/n-quads").right.get) should ===(true)
+			set.contains(MediaType.parse("application/rdf+xml").toOption.get) should ===(true)
+			set.contains(MediaType.parse("application/RDF+XML").toOption.get) should ===(true)
+			set.contains(MediaType.parse("application/ld+json").toOption.get) should ===(true)
+			set.contains(MediaType.parse("application/ld+JSON").toOption.get) should ===(true)
+			set.contains(MediaType.parse("application/trig").toOption.get) should ===(true)
+			set.contains(MediaType.parse("application/trix").toOption.get) should ===(true)
+			set.contains(MediaType.parse("text/turtle").toOption.get) should ===(true)
+			set.contains(MediaType.parse("text/n-quads").toOption.get) should ===(true)
 		}
 
 		"allow registering custom media type" in {

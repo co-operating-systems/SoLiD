@@ -11,6 +11,7 @@ object Dependencies {
 	val bananaVersion = "0.9.0-SNAPSHOT"
 	val alpakkaVersion = "2.0.2"
 	val bouncyVersion = "1.68"
+	val refinedVersion = "0.9.23+7-d4890dd0-SNAPSHOT"
 
 
 	//
@@ -64,9 +65,20 @@ object Dependencies {
 	 */
 	val catsParse =  "org.typelevel" %% "cats-parse" % "0.3.2"
 
+	val refined = Seq(
+		"eu.timepit" %% "refined"                 % refinedVersion,
+		"eu.timepit" %% "refined-cats"            % refinedVersion // optional
+//		"eu.timepit" %% "refined-eval"            % refinedVersion, // optional, JVM-only
+//		"eu.timepit" %% "refined-jsonpath"        % refinedVersion, // optional, JVM-only
+//		"eu.timepit" %% "refined-pureconfig"      % refinedVersion, // optional, JVM-only
+//		"eu.timepit" %% "refined-scalacheck"      % refinedVersion, // optional
+//		"eu.timepit" %% "refined-scalaz"          % refinedVersion, // optional
+//		"eu.timepit" %% "refined-scodec"          % refinedVersion, // optional
+//		"eu.timepit" %% "refined-scopt"           % refinedVersion, // optional
+//		"eu.timepit" %% "refined-shapeless"       % refinedVersion  // optional
+	).map(_.exclude("org.scala-lang.modules","scala-xml_2.13"))
 
-
-	def dottyCompatLibs = (Seq(scalaz, alpakka, catsParse) ++ akka ++ akkaTest ++ banana)
+	def dottyCompatLibs = (Seq(scalaz, alpakka, catsParse) ++ akka ++ akkaTest ++ banana ++ refined)
 		.map( o => o cross CrossVersion.for3Use2_13)
 
 	//
