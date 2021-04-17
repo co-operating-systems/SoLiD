@@ -24,7 +24,7 @@ object Rfc8941 {
 	/** SFInt's cover a subspace of Java Longs.
 	 * An Opaque type would not do, as these need to be pattern matched.
 	 * Only the object constructor can build these */
-	final case class SfInt private(long: Long) extends AnyVal
+	final case class SfInt private(val long: Long) extends AnyVal
 
 	object SfInt:
 		val MAX_VALUE: Long = 999_999_999_999_999
@@ -45,7 +45,7 @@ object Rfc8941 {
 	end SfInt
 
 	/* https://www.rfc-editor.org/rfc/rfc8941.html#ser-decimal */
-	final case class SfDec private(double: Double) extends AnyVal
+	final case class SfDec private(val double: Double) extends AnyVal
 
 	object SfDec :
 		val MAX_VALUE: Double = 999_999_999_999.999
@@ -73,7 +73,7 @@ object Rfc8941 {
 	 * class has to be abstract to remove the `copy` operation which would allow objects
 	 * outside this package to create illegal values.
 	 **/
-	final case class SfString private(asciiStr: String) extends AnyVal:
+	final case class SfString private(val asciiStr: String) extends AnyVal:
 		/** the string formatted for inclusion in Rfc8941 output with surrounding "..." and escaped \ and " */
 		def formattedString: String = {
 			import SfString.bs
@@ -100,7 +100,7 @@ object Rfc8941 {
 	end SfString
 
 	// class is abstract to remove copy operation
-	final case class Token private(t: String) extends AnyVal
+	final case class Token private(val t: String) extends AnyVal
 
 	object Token:
 		@throws[ParsingException]
@@ -111,7 +111,9 @@ object Rfc8941 {
 		private[Rfc8941] def unsafeParsed(name: String) = new Token(name)
 	end Token
 
-	sealed trait Parameterized
+	sealed trait Parameterized {
+		def params: Params
+	}
 
 	/**
 	 * see [[https://www.rfc-editor.org/rfc/rfc8941.html#section-3.3 §3.3 Items]] of RFC8941.
