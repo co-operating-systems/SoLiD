@@ -106,10 +106,10 @@ class Rfc8941_Test extends munit.FunSuite {
 	}
 
 	test("test sfString") {
-		assertEquals(sfString.parse(""""42""""), R(sf"42"))
-		assertEquals(sfString.parse(""""123456789012345""""), R(sf"123456789012345"))
-		assertEquals(sfString.parse(""""a42b""""), R(sf"a42b"))
-		assertEquals(sfString.parse(""""a\"42\\b""""), R(sf"""a"42\b"""))
+		assertEquals(sfString.parseAll(""""42""""), RA(sf"42"))
+		assertEquals(sfString.parseAll(""""123456789012345""""), RA(sf"123456789012345"))
+		assertEquals(sfString.parseAll(""""a42b""""), RA(sf"a42b"))
+		assertEquals(sfString.parseAll(""""a\"42\\b""""), RA(sf"""a"42\b"""))
 		parseFail(sfString.parse(""""123456789012345"""), "no end quote")
 		parseFail(sfString.parse(""""Bahnhofstraße"""), "no german here")
 		parseFailAll(sfString.parseAll("""a"123hello""""), "letter before quote")
@@ -123,10 +123,10 @@ class Rfc8941_Test extends munit.FunSuite {
 	}
 
 	test("test sfToken") {
-		assertEquals(sfToken.parse("foo123/456"), R(Token("foo123/456")))
-		assertEquals(sfToken.parse("*logicomix:"), R(Token("*logicomix:")))
-		assertEquals(sfToken.parse("*!#$%&'*+-.^_"), R(Token("*!#$%&'*+-.^_")))
-		assertEquals(sfToken.parse("goodmorning"), R(Token("goodmorning")))
+		assertEquals(sfToken.parseAll("foo123/456"), RA(Token("foo123/456")))
+		assertEquals(sfToken.parseAll("*logicomix:"), RA(Token("*logicomix:")))
+		assertEquals(sfToken.parseAll("*!#$%&'*+-.^_"), RA(Token("*!#$%&'*+-.^_")))
+		assertEquals(sfToken.parseAll("goodmorning"), RA(Token("goodmorning")))
 		parseFail(sfToken.parse("!hello"), "can't start with !")
 		parseFailAll(sfToken.parseAll("#good morning"), "can't start with #")
 		parseFailAll(sfToken.parseAll(" goodmorning"), "can't start with space")
@@ -150,40 +150,40 @@ class Rfc8941_Test extends munit.FunSuite {
 
 	test("test sfList") {
 		assertEquals(
-			sfList.parse("sugar, tea, rum"),
-			R(List(PI(Token("sugar")), PI(Token("tea")), PI(Token("rum"))))
+			sfList.parseAll("sugar, tea, rum"),
+			RA(List(PI(Token("sugar")), PI(Token("tea")), PI(Token("rum"))))
 		)
 		assertEquals(
-			sfList.parse("sugar,tea,rum"),
-			R(List(PI(Token("sugar")), PI(Token("tea")), PI(Token("rum"))))
+			sfList.parseAll("sugar,tea,rum"),
+			RA(List(PI(Token("sugar")), PI(Token("tea")), PI(Token("rum"))))
 		)
 		assertEquals(
-			sfList.parse("sugar, tea ,   rum"),
-			R(List(PI(Token("sugar")), PI(Token("tea")), PI(Token("rum"))))
+			sfList.parseAll("sugar, tea ,   rum"),
+			RA(List(PI(Token("sugar")), PI(Token("tea")), PI(Token("rum"))))
 		)
 		assertEquals(
-			sfList.parse(""""sugar" , "tea",   "rum""""),
-			R(List(PI(sf"sugar"), PI(sf"tea"), PI(sf"rum")))
+			sfList.parseAll(""""sugar" , "tea",   "rum""""),
+			RA(List(PI(sf"sugar"), PI(sf"tea"), PI(sf"rum")))
 		)
 		assertEquals(
-			sfList.parse("123.45 , 34.33, 42, 56.789"),
-			R(List(PI(SfDec("123.45")), PI(SfDec("34.33")), PI(SfInt("42")), PI(SfDec("56.789"))))
+			sfList.parseAll("123.45 , 34.33, 42, 56.789"),
+			RA(List(PI(SfDec("123.45")), PI(SfDec("34.33")), PI(SfInt("42")), PI(SfDec("56.789"))))
 		)
 		assertEquals(
-			sfList.parse("""123.450 , 034.33, 42, foo123/456 , ?0  ,  ?1, "rum", :cafebabe:"""),
-			R(List(PI(SfDec("123.450")), PI(SfDec("034.33")), PI(SfInt("42")),
+			sfList.parseAll("""123.450 , 034.33, 42, foo123/456 , ?0  ,  ?1, "rum", :cafebabe:"""),
+			RA(List(PI(SfDec("123.450")), PI(SfDec("034.33")), PI(SfInt("42")),
 				PI(Token("foo123/456")), PI(false), PI(true), PI(sf"rum"), PI(cafebabe)))
 		)
 		assertEquals(
-			sfList.parse("""123.450 , 42, foo123/456 , ?0, "No/No", :cafebabe:"""),
-			R(List(PI(SfDec("123.450")), PI(SfInt("42")),
+			sfList.parseAll("""123.450 , 42, foo123/456 , ?0, "No/No", :cafebabe:"""),
+			RA(List(PI(SfDec("123.450")), PI(SfInt("42")),
 				PI(Token("foo123/456")), PI(false), PI(sf"No/No"), PI(cafebabe)))
 		)
 		assertEquals(
-			sfList.parse(
+			sfList.parseAll(
 				"""1234.750;  n=4;f=3 , 42;magic="h2g2", foo123/456;lang=en ,
 				  |   ?0;sleep=?1, "No/No", :cafebabe:;enc=unicode""".stripMargin.filter(_ != '\n').toString),
-			R(List(PI(SfDec("1234.750"),ListMap(Token("n")->SfInt("4"),Token("f")->SfInt("3"))),
+			RA(List(PI(SfDec("1234.750"),ListMap(Token("n")->SfInt("4"),Token("f")->SfInt("3"))),
 				PI(SfInt("42"),ListMap(Token("magic")->sf"h2g2")),
 				PI(Token("foo123/456"),ListMap(Token("lang")->Token("en"))),
 				PI(false,ListMap(Token("sleep")->true)),
@@ -197,6 +197,21 @@ class Rfc8941_Test extends munit.FunSuite {
 	//
 	//Inner Lists
 	//
+	test("inner Lists") {
+		assertEquals(
+			innerList.parseAll("""("foo" "bar")"""),
+			RA(IL(PI(sf"foo"), PI(sf"bar"))())
+		)
+		assertEquals(
+			innerList.parseAll("""(  "foo"  "bar")"""),
+			RA(IL(PI(sf"foo"), PI(sf"bar"))())
+		)
+		assertEquals(
+			innerList.parseAll("""(  "foo"  "bar"   )"""),
+			RA(IL(PI(sf"foo"), PI(sf"bar"))())
+		)
+	}
+
 	test("lists of innerList") {
 		assertEquals(
 			sfList.parse("""("foo" "bar"), ("baz"), ("bat" "one"), ()"""),
@@ -262,10 +277,10 @@ class Rfc8941_Test extends munit.FunSuite {
 						|""".rfc8792single
 
 		assertEquals(
-			sfDictionary.parse(`ex§4.1`),
-			R(ListMap(
+			sfDictionary.parseAll(`ex§4.1`),
+			RA(ListMap(
 				Token("sig1") -> IL(
-					sf"@request-target",sf"host",sf"date",sf"cache-control",
+					sf"@request-target", sf"host", sf"date", sf"cache-control",
 					sf"x-empty-header", sf"x-example"
 				)(
 					Token("keyid")-> sf"test-key-a",

@@ -237,7 +237,7 @@ object Rfc8941 {
 
 		val innerList: P[IList] = {
 			import R5234.sp
-			(((P.char('(') ~ sp.rep0) *> ((sfItem ~ (sp.rep(1) *> sfItem).rep0 <* sp.rep0).?) <* P.char(')')) ~ parameters)
+			(((P.char('(') ~ sp.rep0) *> (sfItem ~ ((sp.rep(1) *> sfItem).backtrack.rep0) <* sp.rep0).? <* P.char(')')) ~ parameters)
 				.map {
 					case (Some(pi, lpi), params) => IList(pi :: lpi, params)
 					case (None, params) => IList(List(), params)

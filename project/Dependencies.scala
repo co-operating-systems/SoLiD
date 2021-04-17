@@ -65,20 +65,12 @@ object Dependencies {
 	 */
 	val catsParse =  "org.typelevel" %% "cats-parse" % "0.3.2"
 
-	val refined = Seq(
-		"eu.timepit" %% "refined"                 % refinedVersion,
-		"eu.timepit" %% "refined-cats"            % refinedVersion // optional
-//		"eu.timepit" %% "refined-eval"            % refinedVersion, // optional, JVM-only
-//		"eu.timepit" %% "refined-jsonpath"        % refinedVersion, // optional, JVM-only
-//		"eu.timepit" %% "refined-pureconfig"      % refinedVersion, // optional, JVM-only
-//		"eu.timepit" %% "refined-scalacheck"      % refinedVersion, // optional
-//		"eu.timepit" %% "refined-scalaz"          % refinedVersion, // optional
-//		"eu.timepit" %% "refined-scodec"          % refinedVersion, // optional
-//		"eu.timepit" %% "refined-scopt"           % refinedVersion, // optional
-//		"eu.timepit" %% "refined-shapeless"       % refinedVersion  // optional
-	).map(_.exclude("org.scala-lang.modules","scala-xml_2.13"))
+//	val refined = Seq(
+//		"eu.timepit" %% "refined"                 % refinedVersion,
+//		"eu.timepit" %% "refined-cats"            % refinedVersion // optional
+//	).map(_.exclude("org.scala-lang.modules","scala-xml_2.13"))
 
-	def dottyCompatLibs = (Seq(scalaz, alpakka, catsParse) ++ akka ++ akkaTest ++ banana ++ refined)
+	def dottyCompatLibs = (Seq(scalaz, alpakka, catsParse) ++ akka ++ akkaTest ++ banana)
 		.map( o => o cross CrossVersion.for3Use2_13)
 
 	//
