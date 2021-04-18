@@ -118,7 +118,8 @@ object Rfc8941 {
 	/**
 	 * see [[https://www.rfc-editor.org/rfc/rfc8941.html#section-3.3 §3.3 Items]] of RFC8941.
 	 */
-	type Item = SfInt | SfDec | SfString | Token | ArraySeq[Byte] | Boolean
+	type Item = SfInt | SfDec | SfString | Token | Bytes | Boolean
+	type Bytes = ArraySeq[Byte]
 	type Param = (Token, Item)
 	type Params = ListMap[Token, Item]
 	type SfList = List[Parameterized]
@@ -139,19 +140,19 @@ object Rfc8941 {
 
 	/** Parameterized Item */
 	final
-	case class PItem(item: Item, params: Params) extends Parameterized
+	case class PItem[T<:Item](item: T, params: Params) extends Parameterized
 
 	object PItem:
-		def apply(item: Item): PItem = new PItem(item,ListMap())
-		def apply(item: Item)(params: Param*): PItem = new PItem(item,ListMap(params*))
+		def apply[T<:Item](item: T): PItem[T] = new PItem[T](item,ListMap())
+		def apply[T<:Item](item: T)(params: Param*): PItem[T] = new PItem(item,ListMap(params*))
 
 	/** Inner List */
-	final case class IList(items: List[PItem], params: Params) extends Parameterized
+	final case class IList(items: List[PItem[_]], params: Params) extends Parameterized
 
 	object IList:
-		def apply(items: PItem*)(params: Param*): IList = new IList(items.toList,ListMap(params*))
+		def apply(items: PItem[_]*)(params: Param*): IList = new IList(items.toList,ListMap(params*))
 
-	implicit val token2PI: Conversion[Item,PItem] = (i: Item) => PItem(i)
+	implicit def token2PI[T<:Item]: Conversion[T,PItem[T]] = (i: T) => PItem[T](i)
 	private def paramConversion(paras: Param*): Params = ListMap(paras*)
 	implicit val paramConv: Conversion[Seq[Param],Params] = paramConversion
 
@@ -229,11 +230,11 @@ object Rfc8941 {
 		//note: parameters always returns an answer (the empty list) as everything can have parameters
 		//todo: this is not exeactly how it is specified, so check here if something goes wrong
 		val parameters: P0[Params] =
-		(P.char(';') *> ows *> parameter).rep0.orElse(P.pure(List())).map { list =>
-			ListMap.from[Token, Item](list.iterator)
-		}
+			(P.char(';') *> ows *> parameter).rep0.orElse(P.pure(List())).map { list =>
+				ListMap.from[Token, Item](list.iterator)
+			}
 
-		val sfItem: P[PItem] = (bareItem ~ parameters).map((item, params) => PItem(item, params))
+		val sfItem: P[PItem[Item]] = (bareItem ~ parameters).map((item, params) => PItem(item, params))
 
 		val innerList: P[IList] = {
 			import R5234.sp
@@ -287,7 +288,7 @@ object Rfc8941 {
 					case d: SfDec => d.double.toString
 					case s: SfString => s.formattedString
 					case tk: Token => tk.t
-					case as: ArraySeq[Byte] => ":"+Base64.getEncoder
+					case as: Bytes => ":"+Base64.getEncoder
 						.encodeToString(as.unsafeArray.asInstanceOf[Array[Byte]])+":"
 					case b: Boolean => if b then "?1" else "?0"
 
@@ -306,10 +307,10 @@ object Rfc8941 {
 			extension (o: Params)
 				def canon: String = o.map(_.canon).mkString
 
-		given paramItemSer(using
+		given paramItemSer[T<:Item](using
 			Serialise[Item], Serialise[Params]
-		): Serialise[PItem] with
-			extension (o: PItem)
+		): Serialise[PItem[T]] with
+			extension (o: PItem[T])
 				def canon: String = o.item.canon + o.params.canon
 
 		given sfListSer(using
@@ -321,12 +322,12 @@ object Rfc8941 {
 
 		given sfDictSer(using
 			Serialise[Item], Serialise[Param], Serialise[Params],
-			Serialise[PItem], Serialise[IList]
+			Serialise[PItem[Item]], Serialise[IList]
 		): Serialise[SfDict] with
 			extension (o: SfDict)
 				def canon: String = o.map{
 					case (tk, PItem(true,params)) => tk.canon+params.canon
-					case (tk, pit: PItem) => tk.canon+"="+pit.canon
+					case (tk, pit: PItem[_]) => tk.canon+"="+pit.canon
 					case (tk, lst: IList) => tk.canon+"="+lst.canon
 				}.mkString(", ")
 	end Serialise

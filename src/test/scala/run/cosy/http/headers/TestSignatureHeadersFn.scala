@@ -7,11 +7,12 @@ import akka.http.scaladsl.model.Uri
 import akka.http.scaladsl.model.headers.RawHeader
 import run.cosy.ldp.testUtils.StringUtils._
 
-import scala.collection.immutable.ListMap
+import java.util.Base64
+import scala.collection.immutable.{ArraySeq, ListMap}
 import scala.language.existentials
 import scala.util.{Success, Try}
 
-class SignatureInputTest extends munit.FunSuite {
+class TestSignatureHeadersFn extends munit.FunSuite {
 	import scala.language.implicitConversions
 	import Rfc8941.Serialise.given
 
@@ -44,7 +45,7 @@ class SignatureInputTest extends munit.FunSuite {
 		Token("keyid")-> sf"<https://alice.pdf/k/clef#>"
 	)
 
-	test("one header") {
+	test("`Signature-Input` with one header") {
 		val Success(tsi1) = `Signature-Input`.parse(ex1)
 		val Some(sig1) = tsi1.get(Token("sig1"))
 		assertEquals(sig1.il,expected1)
@@ -68,7 +69,7 @@ class SignatureInputTest extends munit.FunSuite {
 			case _ => fail
 	}
 
-	test("two headers") {
+	test("`Signature-Input` with two headers") {
 		val sigTxt = s"$ex1, $ex3,  $ex2"
 		val Success(tsi1) = `Signature-Input`.parse(s"$ex1, $ex3,  $ex2")
 		assertEquals(tsi1.si.size,2) // filtered out ex3
@@ -102,6 +103,36 @@ class SignatureInputTest extends munit.FunSuite {
 				assertEquals(sigIn2.created,Some(140217000L))
 				assertEquals(sigIn2.expires,Some(140220000L))
 			case _ => fail
+	}
+
+	val base64Ex1 ="""K2qGT5srn2OGbOIDzQ6kYT+ruaycnDAAUpKv+ePFfD0RAxn/1BUe\
+						  |      Zx/Kdrq32DrfakQ6bPsvB9aqZqognNT6be4olHROIkeV879RrsrObury8L9SCEibe\
+						  |      oHyqU/yCjphSmEdd7WD+zrchK57quskKwRefy2iEC5S2uAH0EPyOZKWlvbKmKu5q4\
+						  |      CaB8X/I5/+HLZLGvDiezqi6/7p2Gngf5hwZ0lSdy39vyNMaaAT0tKo6nuVw0S1MVg\
+						  |      1Q7MpWYZs0soHjttq0uLIA3DIbQfLiIvK6/l0BdWTU7+2uQj7lBkQAsFZHoA96ZZg\
+						  |      FquQrXRlmYOh+Hx5D9fJkXcXe5tmAg==""".rfc8792single
+	val base64Ex2 = """ON3HsnvuoTlX41xfcGWaOEVo1M3bJDRBOp0Pc/O\
+							|       jAOWKQn0VMY0SvMMWXS7xG+xYVa152rRVAo6nMV7FS3rv0rR5MzXL8FCQ2A35DCEN\
+							|       LOhEgj/S1IstEAEFsKmE9Bs7McBsCtJwQ3hMqdtFenkDffSoHOZOInkTYGafkoy78\
+							|       l1VZvmb3Y4yf7McJwAvk2R3gwKRWiiRCw448Nt7JTWzhvEwbh7bN2swc/v3NJbg/w\
+							|       JYyYVbelZx4IywuZnYFxgPl/qvqbAjeEVvaLKLgSMr11y+uzxCHoMnDUnTYhMrmOT\
+							|       4O8lBLfRFOcoJPKBdoKg9U0a96U2mUug1bFOozEVYFg==""".rfc8792single
+	val signEx1 = s"""sig1=:$base64Ex1:"""
+	val signEx2 = s"""reverse_proxy_sig=:$base64Ex2:, sig1=:$base64Ex1:"""
+
+	test("Signature") {
+		val Success(sigs1) = Signature.parse(signEx1)
+		assertEquals(sigs1.sigmap.size,1)
+		val Some(sig1Arr) = sigs1.get("sig1")
+		assertEquals(sig1Arr, ArraySeq.from(Base64.getDecoder.decode(base64Ex1)))
+
+		val Success(sigs2) = Signature.parse(signEx2)
+		assertEquals(sigs2.sigmap.size,2)
+		val Some(sig2Arr) = sigs2.get("sig1")
+		assertEquals(sig2Arr, ArraySeq.from(Base64.getDecoder.decode(base64Ex1)))
+		val Some(sig3Arr) = sigs2.get("reverse_proxy_sig")
+		assertEquals(sig3Arr, ArraySeq.from(Base64.getDecoder.decode(base64Ex2)))
+
 	}
 
 }

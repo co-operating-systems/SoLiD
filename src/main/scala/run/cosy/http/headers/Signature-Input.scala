@@ -20,8 +20,9 @@ import scala.collection.immutable
 
 
 /**
- *  [[https://tools.ietf.org/html/draft-ietf-httpbis-message-signatures-02#section-4.1 4.1 The 'Signature-Input' HTTP header]] defined in "Signing HTTP Messages" HttpBis RFC.
- *  since the only algorithm now is "hs2019" we don't allow anything else to be set
+ * [[https://tools.ietf.org/html/draft-ietf-httpbis-message-signatures-03#section-4.1 4.1 The 'Signature-Input' HTTP header]] 
+ * defined in "Signing HTTP Messages" HttpBis RFC. 
+ * Since version 03 signature algorithms have been re-introduced, but we only implement "hs2019" for simplicity.
  * @param text
  */
 final case class `Signature-Input`(sig: SigInputs) extends BetterCustomHeader[`Signature-Input`]:
@@ -61,7 +62,7 @@ final case class SigInputs private(val si: ListMap[Rfc8941.Token,SigInput]) exte
 	def get(key: Rfc8941.Token): Option[SigInput] = si.get(key)
 }
 
-object SigInputs {
+object SigInputs:
 	/**
 	 * Filter out the inputs that this framework does not accept.
 	 * Since this may change with implementations, this should really
@@ -74,7 +75,6 @@ object SigInputs {
 		case (sigName, SigInput(sigInput)) => (sigName,sigInput)
 	})
 
-}
 
 /**
  * A SigInput is a valid Signature-Input build on an Rfc8941 Internal List.
