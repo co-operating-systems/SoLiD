@@ -52,11 +52,10 @@ object Headers {
 		//override try to generalise later
 		def parse(value: UrlEncoded): Try[UnicodeString] = value.decode
 		
-		//can an unapply return a Try in scala3
-		//override - try to generalise later
+		// try to generalise later
 		def unapply(h: HttpHeader): Option[UnicodeString] = h match {
-			case _: (RawHeader | CustomHeader) => 
-				if (h.lowercaseName == lowercaseName) parse(h.value.asEncoded).toOption else None
+			case _: (RawHeader | CustomHeader) if (h.lowercaseName == lowercaseName) =>
+				 parse(h.value.asEncoded).toOption
 			case _ => None
 		}
 }

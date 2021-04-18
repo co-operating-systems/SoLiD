@@ -1,6 +1,6 @@
 package run.cosy.http.headers
 
-import akka.http.scaladsl.model.HttpHeader
+import akka.http.scaladsl.model.{HttpHeader, ParsingException, Uri}
 import akka.http.scaladsl.model.headers.{CustomHeader, RawHeader}
 import cats.parse.Parser
 import com.nimbusds.jose.util.Base64
@@ -12,7 +12,10 @@ import java.time.Instant
 import scala.collection.immutable.ListMap
 import scala.util.{Failure, Success, Try}
 import run.cosy.http.headers.Rfc8941
-import Rfc8941.{IList, Item, PItem, SfInt, SfList, SfString, Token, SfDict}
+import Rfc8941.{IList, Item, PItem, Parameterized, SfDict, SfInt, SfList, SfString, Token}
+import run.cosy.http.Encoding.UnicodeString
+import run.cosy.http.Headers.Slug.parse
+import run.cosy.http.headers.SigInput.{hs2019, keyId}
 
 import scala.collection.immutable
 
@@ -24,9 +27,12 @@ import scala.collection.immutable
  */
 final case class `Signature-Input`(sig: SigInputs) extends BetterCustomHeader[`Signature-Input`]:
 	override def renderInRequests = true
-	override def renderInResponses = false
+	override def renderInResponses = true
 	override val companion = `Signature-Input`
-	override def value: String = sig.canonical
+	override def value: String =
+		import Rfc8941.Serialise.given
+		sig.si.map{(tk,si)=> (tk,si.il)}.asInstanceOf[Rfc8941.SfDict].canon
+
 
 
 object `Signature-Input` extends BetterCustomHeaderCompanion[`Signature-Input`]:
@@ -37,32 +43,26 @@ object `Signature-Input` extends BetterCustomHeaderCompanion[`Signature-Input`]:
 			case Left(e) => Failure(HTTPHeaderParseException(e,value))
 			case Right(lm) => Success(SigInputs.filterValid(lm))
 
-	//can an unapply return a Try in scala3
-	//override - try to generalise later
-	def unapply(h: HttpHeader): Option[SigInputs] = h match {
-		case _: (RawHeader | CustomHeader) =>
-			if (h.lowercaseName == lowercaseName) ??? else ??? //parse(h.value.asEncoded).toOption else None
+	def unapply(h: HttpHeader): Option[SigInputs] =
+		h match
+		case _: (RawHeader | CustomHeader) if h.lowercaseName == lowercaseName => parse(h.value).toOption
 		case _ => None
-	}
+
 end `Signature-Input`
 
 /**
- * A Signature-Input is an SfDictionary whose values are all Internal Lists
- * We don't here verify the structure of this Ilist at this point leaving it
- * to the application layer
+ * SigInputs are Maps from Signature Names to SigInput entries that this
+ * server understands.
  *
  * @param value
  * @return
  */
-case class SigInputs(si: ListMap[Rfc8941.Token,SigInput]) {
-	import Rfc8941.Serialise._
+final case class SigInputs private(val si: ListMap[Rfc8941.Token,SigInput]) extends AnyVal {
 
-	def canonical: String = ??? //(si.asInstanceOf[SfDict]).canon
-
+	def get(key: Rfc8941.Token): Option[SigInput] = si.get(key)
 }
 
 object SigInputs {
-	import Rfc8941.SfString
 	/**
 	 * Filter out the inputs that this framework does not accept.
 	 * Since this may change with implementations, this should really
@@ -72,86 +72,79 @@ object SigInputs {
 	 * Todo: make this independent as described above! (when it functions)
 	 **/
 	def filterValid(lm: SfDict): SigInputs = SigInputs(lm.collect{
-		case (sigName, il: IList) if valid(il) => (sigName,SigInput(il))
+		case (sigName, SigInput(sigInput)) => (sigName,sigInput)
 	})
-	/**
-	 * A Valid SigInpu IList has a Interal list of parameterless Strings (We don't support those just yet)
-	 * and the list has attributes including a keyid, and a protocol. Can have more.
-	 **/
-	def valid(il: IList): Boolean =
-		val headersOk = il.items.forall{ itm =>
-			val Empty = ListMap.empty[Token,Item]
-			itm match
-				case PItem(SfString(hdr),Empty) if acceptedHeadersMap.contains(hdr) => true
-				case _ => false
-		}
-		val (keyIdExists, algoExists) = il.params.foldRight((false,false)){ case (param,(keyIdE, algoE)) =>
-			param match
-				case (Token("keyid"),SfString(id)) if id.startsWith("<") && id.endsWith(">") => (true,algoE)
-				case (Token("alg"),SfString("hs2019")) => (keyIdE,true)
-				case _ => (keyIdE,algoE)
-		}
-		headersOk && keyIdExists && algoExists
 
-	val acceptedHeadersMap = HeaderName.values.toSeq.map(hn=> (hn.toString,hn)).toMap
 }
 
-case class SigInput(il: IList) {
-	def headers = ??? //il.items.map(_.item.)
+/**
+ * A SigInput is a valid Signature-Input build on an Rfc8941 Internal List.
+ * restricted to those this server can understand.
+ * todo: An improved version would be more lenient, allowing opt-in refinements.
+ *
+ * As a Validated data structure, we can keep all the data present in a header for a particular
+ * signature, as that is needed to verify the signature itself. Indeed extra attributes will be
+ * vital to verify a signatue, since the data from this header is part of the signature
+ * @param il
+ */
+final case class SigInput private(val il: IList) extends AnyVal {
+	import Rfc8941.Serialise._
+
+	def headers: Seq[String] = il.items.map{ case PItem(SfString(str),_) => str}
+
+	def keyid: Uri =
+		import SigInput.urlStrRegex
+		val SfString(urlStrRegex(key))  = il.params(keyId)
+		Uri(key)
+
+	def algo = hs2019
+	def created: Option[Long] = il.params.get(Token("created")).collect{case SfInt(time) => time}
+	def expires: Option[Long] = il.params.get(Token("expires")).collect{case SfInt(time) => time}
+
 }
 
 object SigInput {
-	val supported: Map[String, HeaderName] =  HeaderName.values.map(hn => (hn.toString,hn)).toMap
+	val urlStrRegex = "<(.*)>".r
+	val keyId = Token("keyid")
+	val acceptedHeadersMap: Map[String, HeaderName] = HeaderName.values.toSeq.map(hn => (hn.toString, hn)).toMap
 	val hs2019 = SfString("hs2019")
+	val Empty = ListMap.empty[Token, Item]
 
-	def unapply(iList: Rfc8941.IList): Option[SigInput] = {
-		val hdrs: List[HeaderSelector] = iList.items.map{ case PItem(item,params) =>
-			item match
-			case header: String => supported.get(header).map{ hn =>
-				val ip: immutable.Iterable[Selector] = params.map{
-					case (Token("key"),Token(k)) => KeySelector(k)
-					case (Token("prefix"), num: SfInt) => PrefixSelector(num)
-					case _ => unsupported
-				}
-				if ip.exists(_ == unsupported) then UnimplementedSelector
-				else HeaderSelector(hn,ip.toList)
-			}.getOrElse(UnimplementedSelector)
-			case _ => UnimplementedSelector
+	def apply(il: IList): Option[SigInput] = if valid(il) then Some(new SigInput(il)) else None
+
+	//this is really functioning as a constructor in pattern matching contexts
+	def unapply(pzd: Parameterized): Option[SigInput] =
+		pzd match
+			case il: IList if valid(il) => Some(new SigInput(il))
+			case _                      => None
+
+
+	/**
+	 * A Valid SigInpu IList has a Interal list of parameterless Strings (We don't support those just yet)
+	 * and the list has attributes including a keyid, and a protocol. Can have more.
+	 * */
+	def valid(il: IList): Boolean =
+		val headersOk = il.items.forall { itm =>
+			itm match
+				//we don't support attribute selectors on headers yet
+				case PItem(SfString(hdr), Empty) if acceptedHeadersMap.contains(hdr) => true
+				case _ => false
 		}
-		if hdrs.contains(UnimplementedSelector) then None
-		else iList.params.map{
-			case (Token("keyid"),id: String) => ???
-			case (Token("alg"), hs2019 ) => ???
-			case (Token("created"), t0: SfInt) => ???
-			case (Token("expires"), t1: SfInt) => ???
-			case _ =>  ???
+		//we need "alg" and "keyid".
+		//todo: The restriction on "<" and ">" should really be left to calling code.
+		val (keyIdExists, algoExists) = il.params.foldRight((false, false)) { case (param, (keyIdE, algoE)) =>
+			param match
+				case (Token("keyid"), SfString(id)) if id.startsWith("<") && id.endsWith(">") => (true, algoE)
+				case (Token("alg"), SfString("hs2019")) => (keyIdE, true)
+				case _ => (keyIdE, algoE)
 		}
-		//this seems too strict. What if there are more attributes in the message received on the signature?
-		//If new attributes, don't break the algorithm, but refine it, then we may still be able to verify
-		//the siganture. If we drop attributes then we won't be able to do that.
-		???
-	}
-	//		flatMap{
-//			case PItem(item: String, attributes) if HeaderSelector.values.contains(item) => List(item)
-//			case _ => List()
-//		}
+		headersOk && keyIdExists && algoExists
+	end valid
+	
 }
 
-
 /**
- * We lump the parameters together as there may be some we can't interpret,
- * but we requure keyId to be present.
- **/
-class SigAttributes(keyId: String, params: Rfc8941.Params) {
-	import Rfc8941.given
-	//for both created and expires we return the time only if the types are correct, otherwise we ignore.
-	def created: Option[Long] = params.get(Token("created")).collect{case num: SfInt => num.long}
-	def expires: Option[Long] = params.get(Token("expires")).collect{case num: SfInt => num.long}
-	override def toString(): String =  ???
-}
-
-
-/**
+ * todo: implement header selectors
  * Headers can have attributes used to determine
  *  + [[https://tools.ietf.org/html/draft-ietf-httpbis-message-signatures-03#section-2.2 Disctionary Structured Field Members]]
  *  + [[https://tools.ietf.org/html/draft-ietf-httpbis-message-signatures-03#section-2.3 List Prefixes]]
@@ -160,7 +153,10 @@ class SigAttributes(keyId: String, params: Rfc8941.Params) {
  * todo: it may be better to have HeaderSlectors that each work with a HttpHeader                  
  */
 case class HeaderSelector(header: HeaderName, selectors: List[Selector] = List())
-object UnimplementedSelector extends HeaderSelector(HeaderName.`@unimplemented`,List())
+sealed trait Selector
+case class KeySelector(key: String) extends Selector
+case class PrefixSelector(first: SfInt) extends Selector
+
 /**
  * Signature Headers supported.
  * Feel free to add new ones by submitting PRs
@@ -170,13 +166,8 @@ object UnimplementedSelector extends HeaderSelector(HeaderName.`@unimplemented`,
 enum HeaderName(val special: Boolean = false):
 	case `@request-target` extends HeaderName(true)
 	case `@signature-params` extends HeaderName(true)
-	case `@unimplemented` extends HeaderName(true)
 	case date, server, host, `cache-control`
 
-sealed trait Selector
-case class KeySelector(key: String) extends Selector
-case class PrefixSelector(first: SfInt) extends Selector
-object unsupported extends Selector
 
 case class SigVerificationData(pubKey: PublicKey, sig: Signature) {
 	//this is not thread safe!
