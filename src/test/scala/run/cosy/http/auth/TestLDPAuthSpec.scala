@@ -13,7 +13,7 @@ import com.nimbusds.jose.jwk.JWK
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import run.cosy.{Solid, SolidTest}
-import run.cosy.http.Headers.Slug
+import run.cosy.http.headers.Slug
 import run.cosy.ldp.fs.BasicContainer
 import org.w3.banana._
 

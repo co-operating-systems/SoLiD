@@ -13,7 +13,7 @@ import akka.stream.scaladsl.{Concat, FileIO, Merge, RunnableGraph, Source}
 import akka.stream.{ActorMaterializer, IOResult, Materializer}
 import akka.util.ByteString
 import akka.{Done, NotUsed}
-import run.cosy.http.Headers.Slug
+import run.cosy.http.headers.Slug
 import run.cosy.ldp
 
 import java.io.{BufferedReader, BufferedWriter, FileReader, FileWriter}

@@ -14,7 +14,6 @@ import scala.util.{Failure, Success, Try}
 import run.cosy.http.headers.Rfc8941
 import Rfc8941.{IList, Item, PItem, Parameterized, SfDict, SfInt, SfList, SfString, Token}
 import run.cosy.http.Encoding.UnicodeString
-import run.cosy.http.Headers.Slug.parse
 import run.cosy.http.headers.SigInput.{hs2019, keyId}
 
 import scala.collection.immutable

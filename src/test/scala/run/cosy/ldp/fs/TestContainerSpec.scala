@@ -17,7 +17,7 @@ import org.scalatest.BeforeAndAfterAll
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.flatspec.AnyFlatSpec
 import org.slf4j.event.Level
-import run.cosy.http.Headers.Slug
+import run.cosy.http.headers.Slug
 import akka.testkit.TestKit
 import akka.actor.ActorSystem
 import akka.http.scaladsl.model.StatusCodes.{Created, OK}

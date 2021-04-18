@@ -10,7 +10,7 @@ import scala.util.Success
 /** for more possible test cases and examples see [[https://github.com/akka/akka-http/blob/v10.2.4/akka-http-tests/src/test/scala/akka/http/scaladsl/server/ModeledCustomHeaderSpec.scala ModeledCustomHEaderSpec.scala]]
  */
 class TestCustomHeaders extends munit.FunSuite {
-	import run.cosy.http.Headers._
+	import run.cosy.http.headers._
 	import run.cosy.http.Encoding._
 	test("Slug".only) {
 

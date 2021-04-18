@@ -7,7 +7,7 @@ class TestContainerFn extends munit.FunSuite {
 	import model.HttpMethods.POST
 	import model.headers.`Content-Type`
 	import model.{ContentType, ContentTypes, HttpRequest, Uri, HttpEntity}
-	import run.cosy.http.Headers.Slug
+	import run.cosy.http.headers.Slug
 	import run.cosy.http.{Encoding => cEncoding}
 	import run.cosy.ldp.fs.{BasicContainer=>bc}
 
