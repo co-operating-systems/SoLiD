@@ -61,7 +61,7 @@ class TestSignatureHeadersFn extends munit.FunSuite {
 				assertEquals(sis.si.keys.head, Token("sig1"))
 				assertEquals(sis.si.values.head, sig1)
 				val sigIn: SigInput = sis.si.values.head
-				assert(sigIn.headers.contains("cache-control"))
+				assert(sigIn.headers.contains(HeaderName.`cache-control`))
 				assertEquals(sigIn.algo,sf"hs2019")
 				assertEquals(sigIn.keyid,Uri("/keys/key#k1"))
 				assertEquals(sigIn.created,Some(1402170695L))
@@ -71,7 +71,7 @@ class TestSignatureHeadersFn extends munit.FunSuite {
 
 	test("`Signature-Input` with two headers") {
 		val sigTxt = s"$ex1, $ex3,  $ex2"
-		val Success(tsi1) = `Signature-Input`.parse(s"$ex1, $ex3,  $ex2")
+		val Success(tsi1) = `Signature-Input`.parse(sigTxt)
 		assertEquals(tsi1.si.size,2) // filtered out ex3
 		val Some(sig1) = tsi1.get(Token("sig1"))
 		val Some(sig2) = tsi1.get(Token("sig2"))
@@ -82,7 +82,7 @@ class TestSignatureHeadersFn extends munit.FunSuite {
 		assertEquals(name,"Signature-Input")
 		val expectedHdr: SfDict = ListMap(Token("sig1")->expected1, Token("sig2")->expected2)
 		assertEquals(value,expectedHdr.canon)
-
+		import HeaderName._
 		RawHeader("Signature-Input",s"$ex1, $ex2, $ex3") match
 			case `Signature-Input`(sis) =>
 				assertEquals(sis.si.size,2)
@@ -91,13 +91,13 @@ class TestSignatureHeadersFn extends munit.FunSuite {
 				assertEquals(sis.si.values.head, sig1)
 				assertEquals(sis.si.values.tail.head, sig2)
 				val sigIn: SigInput = sis.si.values.head
-				assertEquals(sigIn.headers,Seq("@request-target","host","date","cache-control"))
+				assertEquals(sigIn.headers,Seq(`@request-target`,`host`,`date`,`cache-control`))
 				assertEquals(sigIn.algo,sf"hs2019")
 				assertEquals(sigIn.keyid,Uri("/keys/key#k1"))
 				assertEquals(sigIn.created,Some(1402170695L))
 				assertEquals(sigIn.expires,Some(1402170995L))
 				val sigIn2: SigInput = sis.si.values.tail.head
-				assertEquals(sigIn2.headers,Seq( "host","date","cache-control","@request-target"))
+				assertEquals(sigIn2.headers,Seq( `host`,`date`,`cache-control`,`@request-target`))
 				assertEquals(sigIn2.algo,sf"hs2019")
 				assertEquals(sigIn2.keyid,Uri("https://alice.pdf/k/clef#"))
 				assertEquals(sigIn2.created,Some(140217000L))

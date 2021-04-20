@@ -10,12 +10,13 @@ import akka.http.scaladsl.server.directives.BasicDirectives.extractExecutionCont
 import akka.http.scaladsl.server.directives.RouteDirectives.reject
 import akka.http.scaladsl.util.FastFuture
 import com.nimbusds.jose.jwk.JWK
+import com.nimbusds.jose.util.Base64
 import org.tomitribe.auth.signatures.{Algorithm, Signatures, Signer, SigningAlgorithm, Verifier}
-import run.cosy.http.headers.SigVerificationData
 import run.cosy.http.{InvalidCreatedFieldException, InvalidExpiresFieldException}
 
 import java.net.URI
-import java.security.{PrivateKey, PublicKey, Signature}
+import java.nio.charset.StandardCharsets
+import java.security.{PrivateKey, PublicKey, Signature => JSignature}
 import java.time.{Clock, Instant}
 import java.util
 import java.util.{Locale, Map}
@@ -133,3 +134,21 @@ class HttpSig(
 			signatureExpiration.map(long2Long).orNull
 		))
 }
+
+
+case class SigVerificationData(pubKey: PublicKey, sig: JSignature):
+	//this is not thread safe!
+	def verifySignature(signingStr: String) = (base64SigStr: String) =>
+		sig.initVerify(pubKey)
+		sig.update(signingStr.getBytes(StandardCharsets.US_ASCII))
+		sig.verify(new Base64(base64SigStr).decode())
+
+
+case class SigningData(privateKey: PrivateKey, sig: JSignature):
+	//this is not thread safe!
+	def sign(bytes: Array[Byte]): Try[Array[Byte]] = Try {
+		sig.initSign(privateKey)
+		sig.update(bytes)
+		sig.sign()
+	}
+

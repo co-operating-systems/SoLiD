@@ -21,6 +21,7 @@ import com.typesafe.config.{Config, ConfigFactory}
 import org.w3.banana.PointedGraph
 import run.cosy.http.{IResponse, RDFMediaTypes, RdfParser}
 import run.cosy.http.auth.HttpSig.{Agent, Anonymous, WebServerAgent}
+import run.cosy.http.auth.SigVerificationData
 import run.cosy.ldp.ResourceRegistry
 import run.cosy.ldp.fs.{BasicContainer => BC}
 import scalaz.NonEmptyList
@@ -148,7 +149,6 @@ class Solid(
 
 	import akka.actor.typed.scaladsl.AskPattern.{Askable, schedulerFromActorSystem}
 	import run.cosy.http.auth.HttpSig
-	import run.cosy.http.headers.SigVerificationData
 	import akka.pattern.ask
 
 	import scala.concurrent.duration.*

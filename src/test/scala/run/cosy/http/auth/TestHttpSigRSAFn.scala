@@ -10,7 +10,6 @@ import akka.http.scaladsl.util.FastFuture
 import junit.framework.Assert.fail
 import org.tomitribe.auth.signatures.{Algorithm, PEM, Signature, Signatures, Signer, Verifier}
 import run.cosy.http.auth.HttpSig.KeyAgent
-import run.cosy.http.headers.SigVerificationData
 import run.cosy.ldp.testUtils.TmpDir
 
 import java.io.ByteArrayInputStream
@@ -81,16 +80,16 @@ class TestHttpSigRSAFn extends munit.FunSuite {
 	
 	test("rsaSha512") {
 		import org.tomitribe.auth.signatures.Algorithm
-		val sha516rsaSig = JW2JCA.getSignerAndVerifier("SHA512withRSA").get
+		val sha512rsaSig = JW2JCA.getSignerAndVerifier("SHA512withRSA").get
 		val algorithm = Algorithm.RSA_SHA512
 
-		assertSignature(sha516rsaSig, algorithm, "IItboA8OJgL8WSAnJa8MND04s9j7d" +
+		assertSignature(sha512rsaSig, algorithm, "IItboA8OJgL8WSAnJa8MND04s9j7d" +
 			"B6IJIBVpOGJph8Tmkc5yUAYjvO/UQUKytRBe5CSv2GLfTAmE" + 
 			"7SuRgGGMwdQZubNJqRCiVPKBpuA47lXrKgC/wB0QAMkPHI6c" + 
 			"PllBZRixmjZuU9mIbuLjXMHR+v/DZwOHT9k8x0ILUq2rKE=", 
 			List("date"))
 
-		assertSignature(sha516rsaSig, algorithm, "ggIa4bcI7q377gNoQ7qVYxTA4pEOl" +
+		assertSignature(sha512rsaSig, algorithm, "ggIa4bcI7q377gNoQ7qVYxTA4pEOl" +
 			"xlFzRtiQV0SdPam4sK58SFO9EtzE0P1zVTymTnsSRChmFU2p" +
 			"n+R9VzkAhQ+yEbTqzu+mgHc4P1L5IeeXQ5aAmGENfkRbm2vd" +
 			"OZzP5j6ruB+SJXIlhnaum2lsuyytSS0m/GkWvFJVZFu33M=",

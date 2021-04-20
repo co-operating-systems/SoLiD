@@ -20,8 +20,8 @@ import scala.collection.immutable
 
 
 /**
- * [[https://tools.ietf.org/html/draft-ietf-httpbis-message-signatures-03#section-4.1 4.1 The 'Signature-Input' HTTP header]] 
- * defined in "Signing HTTP Messages" HttpBis RFC. 
+ * [[https://tools.ietf.org/html/draft-ietf-httpbis-message-signatures-03#section-4.1 4.1 The 'Signature-Input' HTTP header]]
+ * defined in "Signing HTTP Messages" HttpBis RFC.
  * Since version 03 signature algorithms have been re-introduced, but we only implement "hs2019" for simplicity.
  * @param text
  */
@@ -37,6 +37,8 @@ final case class `Signature-Input`(sig: SigInputs) extends BetterCustomHeader[`S
 
 object `Signature-Input` extends BetterCustomHeaderCompanion[`Signature-Input`]:
 	override val name = "Signature-Input"
+
+	def apply(name: Rfc8941.Token, sigInput: SigInput): `Signature-Input` = `Signature-Input`(SigInputs(name,sigInput))
 
 	def parse(value: String): Try[SigInputs] =
 		Rfc8941.Parser.sfDictionary.parseAll(value) match
@@ -58,11 +60,14 @@ end `Signature-Input`
  * @return
  */
 final case class SigInputs private(val si: ListMap[Rfc8941.Token,SigInput]) extends AnyVal {
-
 	def get(key: Rfc8941.Token): Option[SigInput] = si.get(key)
+	def append(more: SigInputs): SigInputs = new SigInputs(si ++ more.si)
+	def append(key: Rfc8941.Token, sigInput: SigInput): SigInputs = new SigInputs(si + (key -> sigInput))
 }
 
 object SigInputs:
+	/* create a SigInput with a single element */
+	def apply(name: Rfc8941.Token,siginput: SigInput) = new SigInputs(ListMap(name->siginput))
 	/**
 	 * Filter out the inputs that this framework does not accept.
 	 * Since this may change with implementations, this should really
@@ -87,9 +92,10 @@ object SigInputs:
  * @param il
  */
 final case class SigInput private(val il: IList) extends AnyVal {
-	import Rfc8941.Serialise._
+	import Rfc8941.Serialise.given
 
-	def headers: Seq[String] = il.items.map{ case PItem(SfString(str),_) => str}
+	def headers: Seq[HeaderName] = il.items.map{ case PItem(SfString(str),_) => HeaderName.valueOf(str)}
+	def headerItems: Seq[PItem[SfString]] = il.items.map(_.asInstanceOf[PItem[SfString]])
 
 	def keyid: Uri =
 		import SigInput.urlStrRegex
@@ -99,13 +105,21 @@ final case class SigInput private(val il: IList) extends AnyVal {
 	def algo = hs2019
 	def created: Option[Long] = il.params.get(Token("created")).collect{case SfInt(time) => time}
 	def expires: Option[Long] = il.params.get(Token("expires")).collect{case SfInt(time) => time}
+	
+	def canon: String = il.canon
 
 }
 
 object SigInput {
 	val urlStrRegex = "<(.*)>".r
 	val keyId = Token("keyid")
-	val acceptedHeadersMap: Map[String, HeaderName] = HeaderName.values.toSeq.map(hn => (hn.toString, hn)).toMap
+
+	/** as per [[https://tools.ietf.org/html/draft-ietf-httpbis-message-signatures-03#section-2.4.2 §2.4.2]] the
+	   list of headers MUST NOT include the @signature-params speciality content identifier */
+	val acceptedHeadersMap: Map[String, HeaderName] = {
+		HeaderName.values.toSeq.filter(_ != HeaderName.`@signature-params`)
+			.map(hn => (hn.toString, hn)).toMap
+	}
 	val hs2019 = SfString("hs2019")
 	val Empty = ListMap.empty[Token, Item]
 
@@ -165,23 +179,5 @@ case class PrefixSelector(first: SfInt) extends Selector
 enum HeaderName(val special: Boolean = false):
 	case `@request-target` extends HeaderName(true)
 	case `@signature-params` extends HeaderName(true)
-	case date, server, host, `cache-control`
+	case date, host, etag, `cache-control`
 
-
-case class SigVerificationData(pubKey: PublicKey, sig: Signature) {
-	//this is not thread safe!
-	def verifySignature(signingStr: String) = (base64SigStr: String) =>
-		sig.initVerify(pubKey)
-		sig.update(signingStr.getBytes(StandardCharsets.US_ASCII))
-		sig.verify(new Base64(base64SigStr).decode())
-}
-
-case class SigningData(privateKey: PrivateKey, sig: Signature) {
-	//this is not thread safe!
-	def sign(bytes: Array[Byte]): Try[Array[Byte]] = Try{
-		sig.initSign(privateKey)
-		sig.update(bytes)
-		sig.sign()
-	}
-
-}

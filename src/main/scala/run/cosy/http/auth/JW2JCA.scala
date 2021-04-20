@@ -6,7 +6,6 @@ import com.nimbusds.jose.crypto.impl.RSASSA
 import com.nimbusds.jose.jwk.{AsymmetricJWK, ECKey, JWK, RSAKey}
 import com.nimbusds.jose.util.Base64
 import run.cosy.http.CryptoException
-import run.cosy.http.headers.SigVerificationData
 
 import java.nio.charset.{Charset, StandardCharsets}
 import java.security.{PrivateKey, Provider, PublicKey, Signature}

@@ -43,6 +43,9 @@ final class Signatures private(val sigmap: ListMap[Rfc8941.Token, PItem[Bytes]])
 	@throws[ParsingException]
 	def get(signame: String): Option[Bytes] = sigmap.get(Rfc8941.Token(signame)).map(_.item)
 
+	//add the signature to the list.
+	def add(signame: Rfc8941.Token, signbytes: Bytes) =
+		new Signatures(sigmap.updated(signame,PItem(signbytes)))
 
 object Signatures:
 	def apply(lm: SfDict): Signatures = new Signatures(filterValid(lm))
@@ -52,6 +55,9 @@ object Signatures:
 			// if it is an ArraySeq, it is a ByteArraySequence!
 			(sigName, pi.asInstanceOf[PItem[Bytes]] )
 	}
+
+	def apply(signame: Rfc8941.Token, signbytes: Bytes): Signatures =
+		new Signatures(ListMap(signame->PItem(signbytes)))
 end Signatures
 
 

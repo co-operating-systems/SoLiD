@@ -21,6 +21,6 @@ case class CryptoException(msg: String) extends AuthExc
 case class AuthException(response: ResponseSummary, msg: String) extends AuthExc
 case class InvalidCreatedFieldException(msg: String) extends AuthExc
 case class InvalidExpiresFieldException(msg: String) extends AuthExc
-
+case class UnableToCreateSigHeaderException(msg: String) extends AuthExc
 //developed for cosy
 case class HTTPHeaderParseException(error: cats.parse.Parser.Error, httpHeader: String) extends WebException
