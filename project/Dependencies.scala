@@ -4,157 +4,186 @@ import sbt.{CrossVersion, _}
  * https://www.scala-sbt.org/1.x/docs/Organizing-Build.html
  */
 object Dependencies {
-	val AkkaVersion = "2.6.13"
-	val AkkaHttpVersion = "10.2.4"
-	val scalazVersion = "7.4.0-M7"
-	val circeVersion = "0.14.0-M4"
-	val bananaVersion = "0.9.0-SNAPSHOT"
-	val alpakkaVersion = "2.0.2"
-	val bouncyVersion = "1.68"
-	val refinedVersion = "0.9.23+7-d4890dd0-SNAPSHOT"
 
+	object Versions {
+		val Akka = "2.6.13"
+		val AkkaHttp = "10.2.4"
+		val scalaz = "7.4.0-M7"
+		val circe = "0.14.0-M4"
+		val banana = "0.9.0-SNAPSHOT"
+		val alpakka = "2.0.2"
+		val bouncy = "1.68"
+		val refined = "0.9.23+7-d4890dd0-SNAPSHOT"
+		val catsParse = "0.3.2"
+		val catsCore = "2.6.0"
+		val scalatest = "3.2.8"
+		val tomitribeHttpSig = "1.7"
+		val titaniumJSonLD = "1.0.0"
+		val nimbusDS = "9.8"
+		val logback = "1.2.3"
+		val apacheCommonsCodec = "1.15"
+	}
 
 	//
 	// scala 2.13 libs
 	//
 
-	/**
-	 * Akka Http Core
-	 * Apache 2 License
-	 * @see https://akka.io
-	 * @see https://repo1.maven.org/maven2/com/typesafe/akka
-	 * */
-	val akka = Seq("com.typesafe.akka" % "akka-actor-typed" % AkkaVersion,
-		"com.typesafe.akka" % "akka-stream" % AkkaVersion,
-		"com.typesafe.akka" % "akka-http" % AkkaHttpVersion,
-		"com.typesafe.akka" % "akka-slf4j" % AkkaVersion)
+	object Scala213Libs {
+		import Dependencies.{Versions=>V}
+		/**
+		 * Akka Http Core
+		 * Apache 2 License
+		 *
+		 * @see https://akka.io
+		 * @see https://repo1.maven.org/maven2/com/typesafe/akka
+		 * */
+		val akka = Seq("com.typesafe.akka" % "akka-actor-typed" % V.Akka,
+			"com.typesafe.akka" % "akka-stream" % V.Akka,
+			"com.typesafe.akka" % "akka-http" % V.AkkaHttp,
+			"com.typesafe.akka" % "akka-slf4j" % V.Akka)
 
-	/**
-	 * Apache 2 License
-	 * @see https://doc.akka.io/docs/alpakka/current/
-	 */
-	val alpakka = "com.lightbend.akka" % "akka-stream-alpakka-file" % alpakkaVersion
+		/**
+		 * Apache 2 License
+		 *
+		 * @see https://doc.akka.io/docs/alpakka/current/
+		 */
+		val alpakka = "com.lightbend.akka" % "akka-stream-alpakka-file" % V.alpakka
 
 
-	val akkaTest = Seq("com.typesafe.akka" % "akka-actor-testkit-typed" % AkkaVersion % Test,
-		"com.typesafe.akka" % "akka-stream-testkit" % AkkaVersion % Test,
-		"com.typesafe.akka" % "akka-http-testkit" % AkkaHttpVersion % Test)
+		val akkaTest = Seq("com.typesafe.akka" % "akka-actor-testkit-typed" % V.Akka % Test,
+			"com.typesafe.akka" % "akka-stream-testkit" % V.Akka % Test,
+			"com.typesafe.akka" % "akka-http-testkit" % V.AkkaHttp % Test)
 
-	/**
-	 * banana-rdf uses Scalaz so we won't use cats right now.
-	 * There is a 3.0.0 version of scalaz out, but until banana-rdf compiles to 3.0.0 we
-	 * need to use the 2.13 scala version
-	 * @see https://scalaz.github.io/7/
-	 * @see [[https://github.com/scalaz/scalaz/blob/master/LICENSE.txt License]]
-	 */
-	val scalaz  = "org.scalaz" % "scalaz-core" %  scalazVersion
+		/**
+		 * banana-rdf uses Scalaz so we won't use cats right now.
+		 * There is a 3.0.0 version of scalaz out, but until banana-rdf compiles to 3.0.0 we
+		 * need to use the 2.13 scala version
+		 *
+		 * @see https://scalaz.github.io/7/
+		 * @see [[https://github.com/scalaz/scalaz/blob/master/LICENSE.txt License]]
+		 */
+		val scalaz = "org.scalaz" % "scalaz-core" % V.scalaz
 
-	/**
-	 * banana-rdf is still using 2.13
-	 * [[https://github.com/banana-rdf/banana-rdf/blob/series/0.8.x/LICENSE.md W3C License]]
-	 * @see https://github.com/banana-rdf/banana-rdf
-	 */
-	val banana = Seq(
-		"net.bblfish.rdf" % "banana-rdf" % bananaVersion,
-		"net.bblfish.rdf" % "banana-jena" % bananaVersion
-	)
+		/**
+		 * banana-rdf is still using 2.13
+		 * [[https://github.com/banana-rdf/banana-rdf/blob/series/0.8.x/LICENSE.md W3C License]]
+		 *
+		 * @see https://github.com/banana-rdf/banana-rdf
+		 */
+		val banana = Seq(
+			"net.bblfish.rdf" % "banana-rdf" % V.banana,
+			"net.bblfish.rdf" % "banana-jena" % V.banana
+		)
 
-	/**
-	 *  available for Scala 3.0.0-RC2 but not RC3
-	 *  MIT License
-	 *  @see https://github.com/typelevel/cats-parse
-	 *  @see https://mvnrepository.com/artifact/org.typelevel/cats-parse
-	 */
-	val catsParse =  "org.typelevel" %% "cats-parse" % "0.3.2"
+		/**
+		 * available for Scala 3.0.0-RC2 but not RC3
+		 * MIT License
+		 *
+		 * @see https://github.com/typelevel/cats-parse
+		 * @see https://mvnrepository.com/artifact/org.typelevel/cats-parse
+		 */
+		val catsParse = "org.typelevel" %% "cats-parse" % V.catsParse
 
-	/**
-	 * Note is available as Scala3 but cats-parse is not there yet.
-	 *
-	 * @see https://mvnrepository.com/artifact/org.typelevel/cats-core
-	 * @see https://github.com/typelevel/cats
-	 **/
-	val catsCore =	"org.typelevel" %% "cats-core" % "2.6.0"
+		/**
+		 * Note is available as Scala3 but cats-parse is not there yet.
+		 *
+		 * @see https://mvnrepository.com/artifact/org.typelevel/cats-core
+		 * @see https://github.com/typelevel/cats
+		 * */
+		val catsCore = "org.typelevel" %% "cats-core" % V.catsCore
 
-//	val refined = Seq(
-//		"eu.timepit" %% "refined"                 % refinedVersion,
-//		"eu.timepit" %% "refined-cats"            % refinedVersion // optional
-//	).map(_.exclude("org.scala-lang.modules","scala-xml_2.13"))
+		//	val refined = Seq(
+		//		"eu.timepit" %% "refined"                 % refinedVersion,
+		//		"eu.timepit" %% "refined-cats"            % refinedVersion // optional
+		//	).map(_.exclude("org.scala-lang.modules","scala-xml_2.13"))
 
-	def dottyCompatLibs = (Seq(scalaz, alpakka, catsParse, catsCore) ++ akka ++ akkaTest ++ banana)
-		.map( o => o cross CrossVersion.for3Use2_13)
+		def allCompatibleLibs = (Seq(scalaz, alpakka, catsParse, catsCore) ++ akka ++ akkaTest ++ banana)
+			.map(o => o cross CrossVersion.for3Use2_13)
+	}
 
 	//
 	// Scala 3 libs
 	//
+	object Scala3Libs {
+		import Dependencies.{Versions=>V}
+		/**
+		 * [[https://www.scalatest.org/install home page]] published under Apache 2 License
+		 *
+		 * @see [[https://mvnrepository.com/artifact/org.scalatest/scalatest maven]]
+		 * */
+		val scalatest = "org.scalatest" %% "scalatest" % V.scalatest % Test
 
-	/**
-	 * [[https://www.scalatest.org/install home page]] published under Apache 2 License
-	 * @see [[https://mvnrepository.com/artifact/org.scalatest/scalatest maven]]
-	 * */
-	val scalatest = "org.scalatest" %% "scalatest" % "3.2.8" % Test
+		/**
+		 * Apache 2 License
+		 *
+		 * @see [[https://scalameta.org/munit/docs/getting-started.html Getting Started]]
+		 * @see https://mvnrepository.com/artifact/org.scalameta/munit
+		 */
+		val munit = "org.scalameta" %% "munit" % "0.7.25" % Test
 
-	/**
-	 * Apache 2 License
-	 * @see [[https://scalameta.org/munit/docs/getting-started.html Getting Started]]
-	 * @see https://mvnrepository.com/artifact/org.scalameta/munit
-	 */
-	val munit = "org.scalameta" %% "munit" % "0.7.25" % Test
+		val all = Seq(scalatest, munit)
+	}
 
-	val scala3Libs = Seq(scalatest, munit)
-	
 	//
 	// Java Libs
 	//
+	object JavaLibs {
+		import Dependencies.{Versions=>V}
+		/**
+		 * Apache 2 License
+		 * Tomitribe HTTP Signatures implementation in Java
+		 *
+		 * @see https://github.com/tomitribe/http-signatures-java
+		 */
+		val tomitribeHttpSig = "org.tomitribe" % "tomitribe-http-signatures" % V.tomitribeHttpSig
 
-	/**
-	 * Apache 2 License
-	 * Tomitribe HTTP Signatures implementation in Java
-	 * @see https://github.com/tomitribe/http-signatures-java
-	 */
-	val tomitribeHttpSig = "org.tomitribe" % "tomitribe-http-signatures" % "1.7"
+		/**
+		 * Apache 2 License
+		 * Titanium JSON-LD 1.1 parser. Only Java parser able to parse security vocab files it seems.
+		 * Should be integrated into banana-rdf.
+		 *
+		 * @see https://github.com/filip26/titanium-json-ld
+		 */
+		val titaniumJSonLD = "com.apicatalog" % "titanium-json-ld" % V.titaniumJSonLD
 
-	/**
-	 * Apache 2 License
-	 * Titanium JSON-LD 1.1 parser. Only Java parser able to parse security vocab files it seems.
-	 * Should be integrated into banana-rdf.
-	 * @see https://github.com/filip26/titanium-json-ld
-	 */
-	val titaniumJSonLD = "com.apicatalog" % "titanium-json-ld" % "1.0.0"
+		/**
+		 * Apache 2 License
+		 *
+		 * @see https://connect2id.com/products/nimbus-jose-jwt/examples/jwk-conversion
+		 */
+		val nimbusDS = "com.nimbusds" % "nimbus-jose-jwt" % V.nimbusDS
 
-	/**
-	 * Apache 2 License
-	 * @see  https://connect2id.com/products/nimbus-jose-jwt/examples/jwk-conversion
-	 */
-	val nimbusDS = "com.nimbusds" % "nimbus-jose-jwt" % "9.8"
+		/**
+		 * BouncyCastle (for parsing PEM encoded objects at present in test)
+		 * MIT style License
+		 *
+		 * @see https://www.bouncycastle.org/latest_releases.html
+		 * @see https://repo1.maven.org/maven2/org/bouncycastle/bcprov-jdk15to18/
+		 */
+		val bouncy = Seq(
+			//"org.bouncycastle" % "bcprov-jdk15to18" % bouncyVersion,
+			//"org.bouncycastle" % "bctls-jdk15to18" % bouncyVersion,
+			"org.bouncycastle" % "bcpkix-jdk15to18" % V.bouncy % Test
+		)
 
-	/**
-	 * BouncyCastle (for parsing PEM encoded objects at present in test)
-	 * MIT style License
-	 * @see https://www.bouncycastle.org/latest_releases.html
-	 * @see https://repo1.maven.org/maven2/org/bouncycastle/bcprov-jdk15to18/
-	 */
-	val bouncy = Seq(
-		//"org.bouncycastle" % "bcprov-jdk15to18" % bouncyVersion,
-		//"org.bouncycastle" % "bctls-jdk15to18" % bouncyVersion,
-		"org.bouncycastle" % "bcpkix-jdk15to18" % bouncyVersion % Test
-	)
-	
 
-	/**
-	 * License [[http://logback.qos.ch/license.html EPL v1.0 and the LGPL 2.1]]
-	 *  used by Akka logging
-	 *  @see http://logback.qos.ch/download.html
-	 */
-	val logback = "ch.qos.logback" % "logback-classic" % "1.2.3"
+		/**
+		 * License [[http://logback.qos.ch/license.html EPL v1.0 and the LGPL 2.1]]
+		 * used by Akka logging
+		 *
+		 * @see http://logback.qos.ch/download.html
+		 */
+		val logback = "ch.qos.logback" % "logback-classic" % V.logback
 
-	/**
-	 * Apache 2.0
-	 * @see [[https://mvnrepository.com/artifact/commons-codec/commons-codec Apache Commons Codec]]
-	 */
-	val apacheCommonsCodec = "commons-codec" % "commons-codec" % "1.15"
+		/**
+		 * Apache 2.0
+		 *
+		 * @see [[https://mvnrepository.com/artifact/commons-codec/commons-codec Apache Commons Codec]]
+		 */
+		val apacheCommonsCodec = "commons-codec" % "commons-codec" % V.apacheCommonsCodec
 
-	val javaLibs = Seq(tomitribeHttpSig, titaniumJSonLD, nimbusDS, logback, apacheCommonsCodec)++bouncy
-
+		val all = Seq(tomitribeHttpSig, titaniumJSonLD, nimbusDS, logback, apacheCommonsCodec) ++ bouncy
+	}
 
 }
 

@@ -13,9 +13,9 @@ lazy val root = project
 		//resolvers += Resolver.bintrayRepo("akka","snapshots"), //use if testing akka snapshots
 		resolvers += Resolver.sonatypeRepo("snapshots"), //for banana-rdf
 
-		libraryDependencies ++= dottyCompatLibs,
-		libraryDependencies ++= javaLibs,
-		libraryDependencies ++= scala3Libs,
+		libraryDependencies ++= Scala3Libs.all,
+		libraryDependencies ++= JavaLibs.all,
+		libraryDependencies ++= Scala213Libs.allCompatibleLibs,
 
 		testFrameworks += new TestFramework("munit.Framework")
 	)
