@@ -121,16 +121,17 @@ class TestSignatureHeadersFn extends munit.FunSuite {
 	val signEx2 = s"""reverse_proxy_sig=:$base64Ex2:, sig1=:$base64Ex1:"""
 
 	test("Signature") {
+		import Rfc8941.{Token=>Tk}
 		val Success(sigs1) = Signature.parse(signEx1)
 		assertEquals(sigs1.sigmap.size,1)
-		val Some(sig1Arr) = sigs1.get("sig1")
+		val Some(sig1Arr) = sigs1.get(Tk("sig1"))
 		assertEquals(sig1Arr, ArraySeq.from(Base64.getDecoder.decode(base64Ex1)))
 
 		val Success(sigs2) = Signature.parse(signEx2)
 		assertEquals(sigs2.sigmap.size,2)
-		val Some(sig2Arr) = sigs2.get("sig1")
+		val Some(sig2Arr) = sigs2.get(Tk("sig1"))
 		assertEquals(sig2Arr, ArraySeq.from(Base64.getDecoder.decode(base64Ex1)))
-		val Some(sig3Arr) = sigs2.get("reverse_proxy_sig")
+		val Some(sig3Arr) = sigs2.get(Tk("reverse_proxy_sig"))
 		assertEquals(sig3Arr, ArraySeq.from(Base64.getDecoder.decode(base64Ex2)))
 
 	}

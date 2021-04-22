@@ -60,17 +60,27 @@ object Dependencies {
 	)
 
 	/**
+	 *  available for Scala 3.0.0-RC2 but not RC3
 	 *  MIT License
 	 *  @see https://github.com/typelevel/cats-parse
+	 *  @see https://mvnrepository.com/artifact/org.typelevel/cats-parse
 	 */
 	val catsParse =  "org.typelevel" %% "cats-parse" % "0.3.2"
+
+	/**
+	 * Note is available as Scala3 but cats-parse is not there yet.
+	 *
+	 * @see https://mvnrepository.com/artifact/org.typelevel/cats-core
+	 * @see https://github.com/typelevel/cats
+	 **/
+	val catsCore =	"org.typelevel" %% "cats-core" % "2.6.0"
 
 //	val refined = Seq(
 //		"eu.timepit" %% "refined"                 % refinedVersion,
 //		"eu.timepit" %% "refined-cats"            % refinedVersion // optional
 //	).map(_.exclude("org.scala-lang.modules","scala-xml_2.13"))
 
-	def dottyCompatLibs = (Seq(scalaz, alpakka, catsParse) ++ akka ++ akkaTest ++ banana)
+	def dottyCompatLibs = (Seq(scalaz, alpakka, catsParse, catsCore) ++ akka ++ akkaTest ++ banana)
 		.map( o => o cross CrossVersion.for3Use2_13)
 
 	//
@@ -81,14 +91,14 @@ object Dependencies {
 	 * [[https://www.scalatest.org/install home page]] published under Apache 2 License
 	 * @see [[https://mvnrepository.com/artifact/org.scalatest/scalatest maven]]
 	 * */
-	val scalatest = "org.scalatest" %% "scalatest" % "3.2.7" % Test
+	val scalatest = "org.scalatest" %% "scalatest" % "3.2.8" % Test
 
 	/**
 	 * Apache 2 License
 	 * @see [[https://scalameta.org/munit/docs/getting-started.html Getting Started]]
 	 * @see https://mvnrepository.com/artifact/org.scalameta/munit
 	 */
-	val munit = "org.scalameta" %% "munit" % "0.7.23" % Test
+	val munit = "org.scalameta" %% "munit" % "0.7.25" % Test
 
 	val scala3Libs = Seq(scalatest, munit)
 	
@@ -160,9 +170,6 @@ object Dependencies {
 //	// https://connect2id.com/products/nimbus-jose-jwt/examples/jwk-conversion
 //			"com.nimbusds" % "nimbus-jose-jwt" % "9.7",
 //			"org.glassfish" % "jakarta.json" % "2.0.0",
-
-////https://mvnrepository.com/artifact/org.typelevel/cats-core
-//				"org.typelevel" %% "cats-core" % "2.5.0"
 
 //https://mvnrepository.com/artifact/com.lihaoyi/utest
 //https://github.com/lihaoyi/utest

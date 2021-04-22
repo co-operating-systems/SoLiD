@@ -325,10 +325,10 @@ object Rfc8941 {
 			Serialise[PItem[Item]], Serialise[IList]
 		): Serialise[SfDict] with
 			extension (o: SfDict)
-				def canon: String = o.map{
+				def canon: String = o.map {
 					case (tk, PItem(true,params)) => tk.canon+params.canon
-					case (tk, pit: PItem[_]) => tk.canon+"="+pit.canon
 					case (tk, lst: IList) => tk.canon+"="+lst.canon
+					case (tk, pit@ PItem(_,_)) => tk.canon+"="+pit.canon
 				}.mkString(", ")
 	end Serialise
 

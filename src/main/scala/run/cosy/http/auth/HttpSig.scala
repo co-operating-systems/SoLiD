@@ -12,6 +12,7 @@ import akka.http.scaladsl.util.FastFuture
 import com.nimbusds.jose.jwk.JWK
 import com.nimbusds.jose.util.Base64
 import org.tomitribe.auth.signatures.{Algorithm, Signatures, Signer, SigningAlgorithm, Verifier}
+import run.cosy.http.headers.Rfc8941
 import run.cosy.http.{InvalidCreatedFieldException, InvalidExpiresFieldException}
 
 import java.net.URI
@@ -20,6 +21,7 @@ import java.security.{PrivateKey, PublicKey, Signature => JSignature}
 import java.time.{Clock, Instant}
 import java.util
 import java.util.{Locale, Map}
+import scala.collection.immutable.ArraySeq
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Try}
 import scala.util.matching.Regex
@@ -78,7 +80,7 @@ object HttpSig {
 						pka			<- fetch(keyId)
 					} yield {
 						import AuthenticationResult.{failWithChallenge, success}
-						if pka.verifySignature(signingStr)(base64Sig) then
+						if pka.verifySignature(signingStr)(ArraySeq.unsafeWrapArray(new Base64(base64Sig).decode())) then
 							success(KeyAgent(Uri(keyId)))
 						else
 							failWithChallenge(HttpChallenge("Signature", None))
@@ -115,6 +117,7 @@ object HttpSig {
 
 }
 
+@deprecated("now we have implemented RFC8941 and Signing Http Messages")
 class HttpSig(
 	headerNames: List[String],
 	signatureCreation: scala.Option[Long],
@@ -138,10 +141,10 @@ class HttpSig(
 
 case class SigVerificationData(pubKey: PublicKey, sig: JSignature):
 	//this is not thread safe!
-	def verifySignature(signingStr: String) = (base64SigStr: String) =>
+	def verifySignature(signingStr: String) = (sigBytes: Rfc8941.Bytes) =>
 		sig.initVerify(pubKey)
 		sig.update(signingStr.getBytes(StandardCharsets.US_ASCII))
-		sig.verify(new Base64(base64SigStr).decode())
+		sig.verify(sigBytes.toArray)
 
 
 case class SigningData(privateKey: PrivateKey, sig: JSignature):

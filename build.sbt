@@ -1,6 +1,6 @@
 import Dependencies._
 
-val Scala3Version = "3.0.0-RC2"
+val Scala3Version = "3.0.0-RC3"
 
 lazy val root = project
 	.in(file("."))

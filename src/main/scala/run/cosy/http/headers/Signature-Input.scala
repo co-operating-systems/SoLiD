@@ -68,6 +68,7 @@ final case class SigInputs private(val si: ListMap[Rfc8941.Token,SigInput]) exte
 object SigInputs:
 	/* create a SigInput with a single element */
 	def apply(name: Rfc8941.Token,siginput: SigInput) = new SigInputs(ListMap(name->siginput))
+
 	/**
 	 * Filter out the inputs that this framework does not accept.
 	 * Since this may change with implementations, this should really
@@ -105,6 +106,10 @@ final case class SigInput private(val il: IList) extends AnyVal {
 	def algo = hs2019
 	def created: Option[Long] = il.params.get(Token("created")).collect{case SfInt(time) => time}
 	def expires: Option[Long] = il.params.get(Token("expires")).collect{case SfInt(time) => time}
+
+	def isValidAt(i: Instant, shift: Long=0): Boolean =
+		created.map(_ - shift <= i.getEpochSecond).getOrElse(true) &&
+			expires.map(_ +shift >= i.getEpochSecond).getOrElse(true)
 	
 	def canon: String = il.canon
 
