@@ -17,11 +17,11 @@ class TestSignatureHeadersFn extends munit.FunSuite {
 	import Rfc8941.Serialise.given
 
 	val ex1 = """sig1=( "@request-target"  "host"   "date"    "cache-control" ); \
-					|       keyid="</keys/key#k1>";  \
-					|       alg="hs2019";   created=1402170695;    expires=1402170995""".rfc8792single
+					|       keyid="</keys/key#k1>"; nonce="randomString";  \
+					|         created=1402170695;    expires=1402170995""".rfc8792single
 
 	val ex2 = """sig2=(   "host"   "date"  "cache-control" "@request-target"); \
-					|       created=140217000;    expires=140220000; alg="hs2019";  \
+					|       created=140217000;    expires=140220000;   \
 					|       keyid="<https://alice.pdf/k/clef#>"""".rfc8792single
 
 	// we don't recognise this one (yet), so it will be filtered out
@@ -32,7 +32,7 @@ class TestSignatureHeadersFn extends munit.FunSuite {
 	val expected1 = IL(
 		sf"@request-target", sf"host", sf"date", sf"cache-control")(
 		Token("keyid")-> sf"</keys/key#k1>",
-		Token("alg")-> sf"hs2019",
+		Token("nonce")-> sf"randomString",
 		Token("created")-> SfInt("1402170695"),
 		Token("expires")-> SfInt("1402170995")
 	)
@@ -41,7 +41,6 @@ class TestSignatureHeadersFn extends munit.FunSuite {
 		sf"host", sf"date", sf"cache-control", sf"@request-target")(
 		Token("created")-> SfInt("140217000"),
 		Token("expires")-> SfInt("140220000"),
-		Token("alg")-> sf"hs2019",
 		Token("keyid")-> sf"<https://alice.pdf/k/clef#>"
 	)
 
@@ -62,7 +61,6 @@ class TestSignatureHeadersFn extends munit.FunSuite {
 				assertEquals(sis.si.values.head, sig1)
 				val sigIn: SigInput = sis.si.values.head
 				assert(sigIn.headers.contains(HeaderName.`cache-control`))
-				assertEquals(sigIn.algo,sf"hs2019")
 				assertEquals(sigIn.keyid,Uri("/keys/key#k1"))
 				assertEquals(sigIn.created,Some(1402170695L))
 				assertEquals(sigIn.expires,Some(1402170995L))
@@ -92,13 +90,11 @@ class TestSignatureHeadersFn extends munit.FunSuite {
 				assertEquals(sis.si.values.tail.head, sig2)
 				val sigIn: SigInput = sis.si.values.head
 				assertEquals(sigIn.headers,Seq(`@request-target`,`host`,`date`,`cache-control`))
-				assertEquals(sigIn.algo,sf"hs2019")
 				assertEquals(sigIn.keyid,Uri("/keys/key#k1"))
 				assertEquals(sigIn.created,Some(1402170695L))
 				assertEquals(sigIn.expires,Some(1402170995L))
 				val sigIn2: SigInput = sis.si.values.tail.head
 				assertEquals(sigIn2.headers,Seq( `host`,`date`,`cache-control`,`@request-target`))
-				assertEquals(sigIn2.algo,sf"hs2019")
 				assertEquals(sigIn2.keyid,Uri("https://alice.pdf/k/clef#"))
 				assertEquals(sigIn2.created,Some(140217000L))
 				assertEquals(sigIn2.expires,Some(140220000L))

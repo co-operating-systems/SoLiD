@@ -141,13 +141,14 @@ object MessageSignature {
 			case GenericHttpCredentials("HttpSig", _, params) =>
 				val tr = for {
 					name <- params.get("name")
-							.toRight(InvalidSigException("HttpSig auth needs name parameter")).toTry
-					(si: SigInput, sig: Bytes) <- req.getSignature(Rfc8941.Token(name))
+							.toRight(InvalidSigException("HttpSig auth needs 'name' parameter")).toTry
+					tkName <- Try(Rfc8941.Token(name)) //todo: tighter input function should move this test out of here
+					(si: SigInput, sig: Bytes) <- req.getSignature(tkName)
 							.toRight(InvalidSigException(
 								s"could not find Signature-Input and Signature for Sig name '$name' ")
 							).toTry
 					if si.isValidAt(clock.instant)
-					sigStr <- req.signingString(si) //we should keep all as Try and add error msgs
+					sigStr <- req.signingString(si)
 				} yield (si, sigStr, sig)
 				// now we have all the data
 				for {

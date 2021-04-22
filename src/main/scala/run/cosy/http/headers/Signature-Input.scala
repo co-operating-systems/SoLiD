@@ -14,7 +14,6 @@ import scala.util.{Failure, Success, Try}
 import run.cosy.http.headers.Rfc8941
 import Rfc8941.{IList, Item, PItem, Parameterized, SfDict, SfInt, SfList, SfString, Token}
 import run.cosy.http.Encoding.UnicodeString
-import run.cosy.http.headers.SigInput.{hs2019, keyId}
 
 import scala.collection.immutable
 
@@ -94,30 +93,40 @@ object SigInputs:
  */
 final case class SigInput private(val il: IList) extends AnyVal {
 	import Rfc8941.Serialise.given
-
+	import SigInput.{createdTk,expiresTk,keyidTk,algTk, nonceTk}
 	def headers: Seq[HeaderName] = il.items.map{ case PItem(SfString(str),_) => HeaderName.valueOf(str)}
 	def headerItems: Seq[PItem[SfString]] = il.items.map(_.asInstanceOf[PItem[SfString]])
 
 	def keyid: Uri =
 		import SigInput.urlStrRegex
-		val SfString(urlStrRegex(key))  = il.params(keyId)
+		val SfString(urlStrRegex(key))  = il.params(keyidTk)
 		Uri(key)
 
-	def algo = hs2019
-	def created: Option[Long] = il.params.get(Token("created")).collect{case SfInt(time) => time}
-	def expires: Option[Long] = il.params.get(Token("expires")).collect{case SfInt(time) => time}
+	def alg: Option[String] = il.params.get(algTk).collect{case SfString(str) => str}
+	def created: Option[Long] = il.params.get(createdTk).collect{case SfInt(time) => time}
+	def expires: Option[Long] = il.params.get(expiresTk).collect{case SfInt(time) => time}
+	def nonce: Option[String] = il.params.get(nonceTk).collect{case SfString(str) => str}
 
 	def isValidAt(i: Instant, shift: Long=0): Boolean =
 		created.map(_ - shift <= i.getEpochSecond).getOrElse(true) &&
 			expires.map(_ +shift >= i.getEpochSecond).getOrElse(true)
-	
+
 	def canon: String = il.canon
 
 }
 
 object SigInput {
 	val urlStrRegex = "<(.*)>".r
-	val keyId = Token("keyid")
+
+	/** registered metadata parameters as per [[https://www.ietf.org/archive/id/draft-ietf-httpbis-message-signatures-04.html#section-5.2.2 §5.2.2]].
+	 * To avoid them being confused with pattern matches variables enclose in ` `.*/
+	val algTk = Token("alg")
+	val createdTk = Token("created")
+	val expiresTk = Token("expires")
+	val keyidTk = Token("keyid")
+	val nonceTk = Token("nonce")
+
+	val registeredParams = Seq(algTk,createdTk,expiresTk,keyidTk,nonceTk)
 
 	/** as per [[https://tools.ietf.org/html/draft-ietf-httpbis-message-signatures-03#section-2.4.2 §2.4.2]] the
 	   list of headers MUST NOT include the @signature-params speciality content identifier */
@@ -125,7 +134,7 @@ object SigInput {
 		HeaderName.values.toSeq.filter(_ != HeaderName.`@signature-params`)
 			.map(hn => (hn.toString, hn)).toMap
 	}
-	val hs2019 = SfString("hs2019")
+
 	val Empty = ListMap.empty[Token, Item]
 
 	def apply(il: IList): Option[SigInput] = if valid(il) then Some(new SigInput(il)) else None
@@ -138,8 +147,10 @@ object SigInput {
 
 
 	/**
-	 * A Valid SigInpu IList has a Interal list of parameterless Strings (We don't support those just yet)
-	 * and the list has attributes including a keyid, and a protocol. Can have more.
+	 * A Valid SigInput IList has a Interal list of parameterless Strings (We don't
+	 * support parameters just yet) taken from the enum of supported headers,
+	 * and the list must have a keyid attribute.
+	 * These requirements are for [[https://github.com/solid/authentication-panel/blob/main/proposals/HttpSignature.md HTTPSig]]. The Signing Http Messages spec is more lenient and also more general.
 	 * */
 	def valid(il: IList): Boolean =
 		val headersOk = il.items.forall { itm =>
@@ -148,15 +159,18 @@ object SigInput {
 				case PItem(SfString(hdr), Empty) if acceptedHeadersMap.contains(hdr) => true
 				case _ => false
 		}
-		//we need "alg" and "keyid".
-		//todo: The restriction on "<" and ">" should really be left to calling code.
-		val (keyIdExists, algoExists) = il.params.foldRight((false, false)) { case (param, (keyIdE, algoE)) =>
-			param match
-				case (Token("keyid"), SfString(id)) if id.startsWith("<") && id.endsWith(">") => (true, algoE)
-				case (Token("alg"), SfString("hs2019")) => (keyIdE, true)
-				case _ => (keyIdE, algoE)
+		//we need "keyid".
+		//todo: The restriction on "<" and ">" should really be left to calling code for a more general library
+		val paramsOk = il.params.forall {
+			case (`keyidTk`, item: SfString) =>
+				val cl = item.asciiStr.trim()
+				cl.startsWith("<") && cl.endsWith(">")
+			case (`createdTk`, _: SfInt) | (`expiresTk`, _: SfInt)   => true
+			case (`algTk`, _: SfString)  | (`nonceTk`, _: SfString)  => true
+			// we are lenient on non-registered params
+			case (attr, _) => !registeredParams.contains(attr)
 		}
-		headersOk && keyIdExists && algoExists
+		headersOk && paramsOk
 	end valid
 	
 }
