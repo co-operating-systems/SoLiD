@@ -20,7 +20,7 @@ import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
 import org.w3.banana.PointedGraph
 import run.cosy.http.{IResponse, RDFMediaTypes, RdfParser}
-import run.cosy.http.auth.HttpSig.{Agent, Anonymous, WebServerAgent}
+import run.cosy.http.auth.{Agent, Anonymous, WebServerAgent}
 import run.cosy.http.auth.SigVerificationData
 import run.cosy.ldp.ResourceRegistry
 import run.cosy.ldp.fs.{BasicContainer => BC}
@@ -166,7 +166,7 @@ class Solid(
 				case Complete(response) => RdfParser.unmarshalToRDF(response,keyIdUrl).flatMap{ (g: IResponse[Rdf#Graph]) =>
 					import http.auth.JWKExtractor.*, http.auth.JW2JCA.jw2rca
 					 PointedGraph(keyIdUrl.toRdf,g.content).asKeyIdInfo match
-						case Some(kidInfo) => FastFuture(jw2rca(kidInfo.pka))
+						case Some(kidInfo) => FastFuture(jw2rca(kidInfo.pka,keyIdUrl))
 						case None => FastFuture.failed(http.AuthException(null, //todo
 							s"Could not find or parse security:publicKeyJwk relation in <$keyIdUrl>"
 						 ))

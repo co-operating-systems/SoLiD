@@ -1,7 +1,7 @@
 package run.cosy.http.headers
 
-import akka.http.scaladsl.model.{HttpHeader, ParsingException}
-import akka.http.scaladsl.model.headers.{CustomHeader, RawHeader}
+import _root_.akka.http.scaladsl.model.{HttpHeader, ParsingException}
+import _root_.akka.http.scaladsl.model.headers.{CustomHeader, RawHeader}
 import run.cosy.http.headers.Rfc8941.{Bytes, IList, PItem, SfDict}
 import run.cosy.http.{BetterCustomHeader, BetterCustomHeaderCompanion, HTTPHeaderParseException, headers}
 

@@ -10,6 +10,7 @@ import run.cosy.http.CryptoException
 import java.nio.charset.{Charset, StandardCharsets}
 import java.security.{PrivateKey, Provider, PublicKey, Signature}
 import scala.util.{Failure, Try}
+import akka.http.scaladsl.model.Uri
 
 /**
  * Map JWK Names to Java Cryptography Architecture names
@@ -17,12 +18,12 @@ import scala.util.{Failure, Try}
 object JW2JCA {
 	val signerFactory = new DefaultJWSSignerFactory()
 
-	def jw2rca(jwk: JWK): Try[SigVerificationData] = {
+	def jw2rca(jwk: JWK, keyId: Uri): Try[SigVerificationData] = {
 		jwk.getAlgorithm match {
 		case jwsAlgo: JWSAlgorithm =>
 			Try(RSASSA.getSignerAndVerifier(jwsAlgo,signerFactory.getJCAContext.getProvider)).flatMap{sig=>
 				jwk match
-				case k: AsymmetricJWK => Try(SigVerificationData(k.toPublicKey, sig))
+				case k: AsymmetricJWK => Try(SigVerificationData(k.toPublicKey, sig)(keyId))
 				case _ => Failure(CryptoException("we only use assymetric keys!"))
 			}
 		case alg => Failure(CryptoException("We do not support algorithm "+alg))

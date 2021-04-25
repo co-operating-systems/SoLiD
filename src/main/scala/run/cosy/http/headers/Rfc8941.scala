@@ -1,6 +1,6 @@
 package run.cosy.http.headers
 
-import akka.http.scaladsl.model.ParsingException
+import _root_.akka.http.scaladsl.model.ParsingException
 import cats.parse.Parser
 import run.cosy.http.WebException
 import run.cosy.http.headers.Rfc8941.Serialise.Serialise
@@ -306,19 +306,15 @@ object Rfc8941 {
 		given paramsSer(using Serialise[Param]): Serialise[Params] with
 			extension (o: Params)
 				def canon: String = o.map(_.canon).mkString
-
-		given paramItemSer[T<:Item](using
+		
+		given sfParamterizedSer[T<:Item,Parameterized](using
 			Serialise[Item], Serialise[Params]
-		): Serialise[PItem[T]] with
-			extension (o: PItem[T])
-				def canon: String = o.item.canon + o.params.canon
+		): Serialise[Parameterized] with
+			extension (o: Parameterized)
+				def canon: String = o match
+					case l: IList => l.items.map(i=>i.canon).mkString("("," ",")")+l.params.canon
+					case pi: PItem[T] => pi.item.canon + pi.params.canon
 
-		given sfListSer(using
-			Serialise[Item], Serialise[Params]
-		): Serialise[IList] with
-			extension (o: IList)
-				def canon: String =
-					o.items.map(i=>i.canon).mkString("("," ",")")+o.params.canon
 
 		given sfDictSer(using
 			Serialise[Item], Serialise[Param], Serialise[Params],

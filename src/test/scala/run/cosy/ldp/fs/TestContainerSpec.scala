@@ -27,7 +27,7 @@ import akka.stream.{ActorMaterializer, Materializer}
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 import akka.http.scaladsl.model.Uri
-import run.cosy.http.auth.HttpSig.WebServerAgent
+import run.cosy.http.auth.WebServerAgent
 import run.cosy.ldp.testUtils.TmpDir
 
 import java.nio.file

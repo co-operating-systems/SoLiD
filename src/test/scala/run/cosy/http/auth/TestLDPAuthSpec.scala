@@ -19,7 +19,7 @@ import org.w3.banana._
 
 import java.nio.file.{Files, Path}
 import concurrent.duration.DurationInt
-import run.cosy.http.auth.HttpSig.WebServerAgent
+import run.cosy.http.auth.WebServerAgent
 import run.cosy.ldp.ResourceRegistry
 import run.cosy.ldp.testUtils.TmpDir.{createDir, deleteDir}
 import run.cosy.RDF.{given,*}
@@ -61,7 +61,7 @@ class TestSolidLDPAuthSpec extends AnyWordSpec with Matchers with ScalatestRoute
 		} finally testKit.shutdownTestKit()
 	end withServer
 
-	class SolidTestPost(solid: Solid, agent: HttpSig.Agent=new HttpSig.Anonymous):
+	class SolidTestPost(solid: Solid, agent: Agent=new Anonymous):
 
 		def newResource(baseDir: Uri, slug: Slug, ct: ContentType.WithFixedCharset, text: String): Uri =
 			HttpRequest(HttpMethods.POST, baseDir, Seq[HttpHeader](slug), HttpEntity(ct,text)) ~>

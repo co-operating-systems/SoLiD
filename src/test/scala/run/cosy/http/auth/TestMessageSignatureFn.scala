@@ -3,7 +3,6 @@ package run.cosy.http.auth
 import akka.http.scaladsl.model.headers.CacheDirectives._
 import akka.http.scaladsl.model.{DateTime, HttpMessage, HttpRequest, MediaRanges, Uri}
 import akka.http.scaladsl.model.headers._
-import org.tomitribe.auth.signatures.{PEM, RSA}
 import run.cosy.http.auth.MessageSignature._
 import run.cosy.http.auth.TestHttpSigRSAFn.{privateKeyPem, publicKeyPem}
 import run.cosy.http.headers.Rfc8941
@@ -11,17 +10,20 @@ import run.cosy.http.headers.SigInput
 import Rfc8941.{IList, SfInt, Token}
 import Rfc8941.Serialise
 import Rfc8941.SyntaxHelper._
+import run.cosy.http.auth.WebKeyidAgent
 
 import scala.language.implicitConversions
 import run.cosy.ldp.testUtils.StringUtils._
 
 import java.io.ByteArrayInputStream
-import java.security.{PublicKey, Signature => JSignature}
+import java.security.spec.{PKCS8EncodedKeySpec, X509EncodedKeySpec}
+import java.security.{KeyFactory, PublicKey, Signature => JSignature}
 import java.time.ZoneId
 import scala.concurrent.ExecutionContext
 import scala.util.Success
 
 class TestMessageSignatureFn extends munit.FunSuite {
+	import run.cosy.http.headers.akka.given
 
 	import TestHttpSigRSAFn.{publicKey,privateKey}
 	lazy val sha512rsaSig: JSignature = JW2JCA.getSignerAndVerifier("SHA512withRSA").get
@@ -35,39 +37,39 @@ class TestMessageSignatureFn extends munit.FunSuite {
 	val req2 = HttpRequest(uri=Uri("/hello/world?who=me"),headers = req1.headers)
 
 	val sigIn1 = SigInput(IList()(
-		Token("keyid")-> sf"</keys/key#k1>",
+		Token("keyid")-> sf"/keys/key#k1",
 		Token("created")-> SfInt("1402170695"),
 		Token("expires")-> SfInt("1402170995")
 	)).get
 	val sigIn1Exp =
-	""""@signature-params": ();keyid="</keys/key#k1>";created=1402170695;expires=1402170995"""
+	""""@signature-params": ();keyid="/keys/key#k1";created=1402170695;expires=1402170995"""
 
 	val sigIn2 = SigInput(IList(sf"date")(sigIn1.il.params.toSeq*)).get
 	val sigIn2Exp =
 		""""date": Thu, 01 Apr 2021 00:00:00 GMT
-		  |"@signature-params": ("date");keyid="</keys/key#k1>";created=1402170695;expires=1402170995""".stripMargin
+		  |"@signature-params": ("date");keyid="/keys/key#k1";created=1402170695;expires=1402170995""".stripMargin
 
 	val sigIn3 = SigInput(IList(sf"date",sf"etag")(sigIn1.il.params.toSeq*)).get
 	val sigIn3Exp =
 		""""date": Thu, 01 Apr 2021 00:00:00 GMT
 		  |"etag": "686897696a7c876b7e"
-		  |"@signature-params": ("date" "etag");keyid="</keys/key#k1>";created=1402170695;expires=1402170995""".stripMargin
+		  |"@signature-params": ("date" "etag");keyid="/keys/key#k1";created=1402170695;expires=1402170995""".stripMargin
 	val sigIn4 = SigInput(IList(sf"date",sf"etag",sf"cache-control")(sigIn1.il.params.toSeq*)).get
 	val sigIn4Exp =""""date": Thu, 01 Apr 2021 00:00:00 GMT
 						  |"etag": "686897696a7c876b7e"
 						  |"cache-control": max-age=60, must-revalidate
-						  |"@signature-params": ("date" "etag" "cache-control");keyid="</keys/key#k1>";created=1402170695;expires=1402170995""".stripMargin
+						  |"@signature-params": ("date" "etag" "cache-control");keyid="/keys/key#k1";created=1402170695;expires=1402170995""".stripMargin
 	val sigIn5 = SigInput(IList(sf"@request-target",sf"etag",sf"cache-control")(sigIn1.il.params.toSeq*)).get
 	val sigIn5Exp =
 		""""@request-target": get /hello/world
 		  |"etag": "686897696a7c876b7e"
 		  |"cache-control": max-age=60, must-revalidate
-		  |"@signature-params": ("@request-target" "etag" "cache-control");keyid="</keys/key#k1>";created=1402170695;expires=1402170995""".stripMargin
+		  |"@signature-params": ("@request-target" "etag" "cache-control");keyid="/keys/key#k1";created=1402170695;expires=1402170995""".stripMargin
 	val r2sigIn5Exp =
 		""""@request-target": get /hello/world?who=me
 		  |"etag": "686897696a7c876b7e"
 		  |"cache-control": max-age=60, must-revalidate
-		  |"@signature-params": ("@request-target" "etag" "cache-control");keyid="</keys/key#k1>";created=1402170695;expires=1402170995""".stripMargin
+		  |"@signature-params": ("@request-target" "etag" "cache-control");keyid="/keys/key#k1";created=1402170695;expires=1402170995""".stripMargin
 
 	test("signature string creation on a request") {
 		assertEquals(req1.signingString(sigIn1),Success(sigIn1Exp))
@@ -84,7 +86,9 @@ class TestMessageSignatureFn extends munit.FunSuite {
 	import scala.concurrent.Future
 
 	def withSigInputTest(testName: String,
-		msg: HttpMessage, sigName: String, sigIn: SigInput, sigData: SigningData, sigVerif: SigVerificationData
+		msg: HttpMessage, sigName: String,
+		sigIn: SigInput, sigData: SigningData, sigVerif: Uri => SigVerificationData,
+		expectedKeyId: Rfc8941.SfString
 	)(using munit.Location): Unit = {
 		test(testName) {
 			val newReq: HttpMessage = msg.withSigInput(Rfc8941.Token(sigName),sigIn)
@@ -95,7 +99,10 @@ class TestMessageSignatureFn extends munit.FunSuite {
 			)
 
 			// next: pretend we fetch the keyId over the web to verify the signature
-			def fetchKeyId(uri: Uri) = FastFuture(Success(sigVerif))
+			def fetchKeyId(uriStr: Rfc8941.SfString) = {
+				val uri = Uri(uriStr.asciiStr)
+				FastFuture(Success(sigVerif(uri)))
+			}
 
 			given ec: ExecutionContext = scala.concurrent.ExecutionContext.global
 			given clock: Clock = Clock.fixed(java.time.Instant.ofEpochSecond(1402170700), java.time.ZoneOffset.UTC)
@@ -105,43 +112,42 @@ class TestMessageSignatureFn extends munit.FunSuite {
 
 			//note: we don't need to add `cred` to the message in an Authorization header. We can just use it
 			//  to test our function.
-			val fres = newReq.asInstanceOf[HttpRequest].signatureAuthN(fetchKeyId)(cred)
+			val fres = newReq.signatureAuthN[WebKeyidAgent](fetchKeyId)(cred)
 			import scala.concurrent.duration.given
 			scala.concurrent.Await.ready(fres,2.seconds)
 			assertEquals(
 				fres.value,
-				Some(Success(run.cosy.http.auth.HttpSig.KeyAgent(sigIn.keyid)))
+				Some(Success(run.cosy.http.auth.WebKeyidAgent(expectedKeyId).get))
 			)
 		}
 	}
 
 	val sigVerif = SigVerificationData(publicKey,sha512rsaSig)
 	val sigdata= SigningData(privateKey,sha512rsaSig)
+	val expectedKeyId = Rfc8941.SfString("/keys/key#k1")
 
 	withSigInputTest("req1 enhanced with empty SigInput",
-		req1,"sig1",sigIn1,sigdata,sigVerif
+		req1,"sig1",sigIn1,sigdata,sigVerif, expectedKeyId
 	)
 
 	withSigInputTest("req1 enhanced with (date) SigInput",
-		req1,"sig1",sigIn2,sigdata,sigVerif
+		req1,"sig1",sigIn2,sigdata,sigVerif,expectedKeyId
 	)
 
 	withSigInputTest("req1 enhanced with (date etag cache-control) SigInput",
-		req1,"sig1",sigIn3,sigdata,sigVerif
+		req1,"sig1",sigIn3,sigdata,sigVerif,expectedKeyId
 	)
 
-
 	withSigInputTest("req1 enhanced with (date etag cache-control) SigInput",
-		req1,"sig1",sigIn4,sigdata,sigVerif
+		req1,"sig1",sigIn4,sigdata,sigVerif,expectedKeyId
 	)
 
 	withSigInputTest("req1 enhanced with (@request-target etag cache-control) SigInput",
-		req1,"sig1",sigIn5,sigdata,sigVerif
+		req1,"sig1",sigIn5,sigdata,sigVerif,expectedKeyId
 	)
 
 	withSigInputTest("req2 enhanced with (@request-target etag cache-control) SigInput",
-		req2,"sig1",sigIn5,sigdata,sigVerif
+		req2,"sig1",sigIn5,sigdata,sigVerif,expectedKeyId
 	)
-	
 
 }

@@ -1,7 +1,7 @@
 package run.cosy.http.headers
 
-import akka.http.scaladsl.model.HttpHeader
-import akka.http.scaladsl.model.headers.{CustomHeader, RawHeader}
+import _root_.akka.http.scaladsl.model.HttpHeader
+import _root_.akka.http.scaladsl.model.headers.{CustomHeader, RawHeader}
 import run.cosy.http.{BetterCustomHeader, BetterCustomHeaderCompanion, Encoding}
 import run.cosy.http.Encoding.{UnicodeString, UrlEncoded}
 

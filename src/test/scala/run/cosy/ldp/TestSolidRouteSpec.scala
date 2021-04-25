@@ -18,7 +18,7 @@ import run.cosy.ldp.fs.BasicContainer
 import java.nio.file.{Files, Path}
 import concurrent.duration.DurationInt
 import run.cosy.http.auth.HttpSig
-import run.cosy.http.auth.HttpSig.WebServerAgent
+import run.cosy.http.auth.{WebServerAgent,Agent,Anonymous}
 import run.cosy.ldp.testUtils.TmpDir.{createDir, deleteDir}
 
 class TestSolidRouteSpec extends AnyWordSpec with Matchers with ScalatestRouteTest {
@@ -52,7 +52,7 @@ class TestSolidRouteSpec extends AnyWordSpec with Matchers with ScalatestRouteTe
 		} finally testKit.shutdownTestKit()
 	end withServer
 			
-	class SolidTestPost(solid: Solid, agent: HttpSig.Agent=new HttpSig.Anonymous):
+	class SolidTestPost(solid: Solid, agent: Agent=new Anonymous):
 		def newResource(baseDir: Uri, slug: Slug, text: String): Uri =
 			Req.Post(baseDir, HttpEntity(text)).withHeaders(slug) ~>
 				solid.routeLdp(agent) ~> check {

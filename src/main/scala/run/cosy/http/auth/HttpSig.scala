@@ -12,8 +12,9 @@ import akka.http.scaladsl.util.FastFuture
 import com.nimbusds.jose.jwk.JWK
 import com.nimbusds.jose.util.Base64
 import org.tomitribe.auth.signatures.{Algorithm, Signatures, Signer, SigningAlgorithm, Verifier}
+import run.cosy.http.auth.{KeyidAgent, WebKeyidAgent}
 import run.cosy.http.headers.Rfc8941
-import run.cosy.http.{InvalidCreatedFieldException, InvalidExpiresFieldException}
+import run.cosy.http.{InvalidCreatedFieldException, InvalidExpiresFieldException, InvalidSigException}
 
 import java.net.URI
 import java.nio.charset.StandardCharsets
@@ -23,15 +24,10 @@ import java.util
 import java.util.{Locale, Map}
 import scala.collection.immutable.ArraySeq
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.{Failure, Try}
+import scala.util.{Failure, Success, Try}
 import scala.util.matching.Regex
 
 object HttpSig {
-
-	trait Agent
-	case class KeyAgent(keyId: Uri) extends Agent
-	class Anonymous extends Agent
-	object WebServerAgent extends Agent
 
 	val URL: Regex = "<(.*)>".r
 
@@ -80,10 +76,12 @@ object HttpSig {
 						pka			<- fetch(keyId)
 					} yield {
 						import AuthenticationResult.{failWithChallenge, success}
-						if pka.verifySignature(signingStr)(ArraySeq.unsafeWrapArray(new Base64(base64Sig).decode())) then
-							success(KeyAgent(Uri(keyId)))
-						else
-							failWithChallenge(HttpChallenge("Signature", None))
+						val tid: Try[WebKeyidAgent] =
+							pka.verifySignature(signingStr)(ArraySeq.unsafeWrapArray(new Base64(base64Sig).decode()))
+						tid.fold(
+							_ => failWithChallenge(HttpChallenge("Signature", None)),
+							kidagent => success(kidagent)
+						)
 					}
 				case e => //todo: we need to return some more details on the failure
 					FastFuture.successful(AuthenticationResult.failWithChallenge(HttpChallenge("Signature",None)))
@@ -137,21 +135,4 @@ class HttpSig(
 			signatureExpiration.map(long2Long).orNull
 		))
 }
-
-
-case class SigVerificationData(pubKey: PublicKey, sig: JSignature):
-	//this is not thread safe!
-	def verifySignature(signingStr: String) = (sigBytes: Rfc8941.Bytes) =>
-		sig.initVerify(pubKey)
-		sig.update(signingStr.getBytes(StandardCharsets.US_ASCII))
-		sig.verify(sigBytes.toArray)
-
-
-case class SigningData(privateKey: PrivateKey, sig: JSignature):
-	//this is not thread safe!
-	def sign(bytes: Array[Byte]): Try[Array[Byte]] = Try {
-		sig.initSign(privateKey)
-		sig.update(bytes)
-		sig.sign()
-	}
 

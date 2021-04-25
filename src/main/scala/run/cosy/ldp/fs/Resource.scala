@@ -10,7 +10,7 @@ import akka.http.scaladsl.model.headers.{Accept, HttpChallenge, Location, `Conte
 import akka.stream.IOResult
 import akka.stream.scaladsl.FileIO
 import run.cosy.http.FileExtensions
-import run.cosy.http.auth.HttpSig.{KeyAgent, WebServerAgent}
+import run.cosy.http.auth.{WebKeyidAgent, WebServerAgent}
 import run.cosy.ldp.ResourceRegistry
 import run.cosy.ldp.fs.BasicContainer.{Cmd, Do, ReqMsg, RouteMsg, WannaDo}
 import run.cosy.ldp.fs.Resource.connegNamesFor
@@ -137,7 +137,7 @@ class Resource(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg]) {
 			}
 
 		def Authorize(wd: WannaDo) =
-			if List(WebServerAgent,KeyAgent("/user/key#")).exists(_ == wd.from) then
+			if List(WebServerAgent,WebKeyidAgent(Uri("/user/key#"))).exists(_ == wd.from) then
 				import wd.{given, *}
 				context.self ! Do(from,req,replyTo)
 			else wd.replyTo ! HttpResponse(StatusCodes.Unauthorized,

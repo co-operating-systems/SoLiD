@@ -9,7 +9,7 @@ import akka.http.scaladsl.server.Directives
 import akka.http.scaladsl.util.FastFuture
 import junit.framework.Assert.fail
 import org.tomitribe.auth.signatures.{Algorithm, PEM, Signature, Signatures, Signer, Verifier}
-import run.cosy.http.auth.HttpSig.KeyAgent
+import run.cosy.http.auth.WebKeyidAgent
 import run.cosy.ldp.testUtils.TmpDir
 
 import java.io.ByteArrayInputStream
@@ -115,12 +115,12 @@ class TestHttpSigRSAFn extends munit.FunSuite {
 			val authorization = "Authorization" -> sig
 			val req: HttpRequest = HttpRequest(method, uri, akkaHeaders(headers :+ authorization))
 			given ec: ExecutionContext = ExecutionContext.global
-			val f: Future[server.Directives.AuthenticationResult[HttpSig.Agent]] =
+			val f: Future[server.Directives.AuthenticationResult[Agent]] =
 				HttpSig.httpSigAuthN(req){ url =>
 					assertEquals(url, uri)
-					FastFuture.successful(SigVerificationData(publicKey,jcaSig))
+					FastFuture.successful(SigVerificationData(publicKey,jcaSig)(url))
 			}(req.header[Authorization].map(_.credentials))
-			assertEquals(Await.result(f, 1.second), Right(KeyAgent(uri)))
+			assertEquals(Await.result(f, 1.second), Right(WebKeyidAgent(uri)))
 
 		verify(signature.toString)
 	}

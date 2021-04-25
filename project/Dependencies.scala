@@ -6,7 +6,7 @@ import sbt.{CrossVersion, _}
 object Dependencies {
 
 	object Versions {
-		val Akka = "2.6.13"
+		val Akka = "2.6.14"
 		val AkkaHttp = "10.2.4"
 		val scalaz = "7.4.0-M7"
 		val circe = "0.14.0-M4"
