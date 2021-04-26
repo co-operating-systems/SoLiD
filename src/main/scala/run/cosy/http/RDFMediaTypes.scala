@@ -115,7 +115,7 @@ object RDFMediaTypes {
 	def rdfData: Seq[MediaType] = Seq(`application/rdf+xml`, `application/n-triples`, `application/n-quads`,
 		`text/n-quads`,`text/turtle`,`application/trig`, `text/n3`,`application/ld+json`
 	)
-	
+
 	def all: Seq[MediaType] = Seq(`application/rdf+xml`, `application/n-triples`, `application/n-quads`,
 		`text/n-quads`,`text/turtle`,`application/trig`, `text/n3`,`application/ld+json`,
 		`application/sparql-results+json`, `application/sparql-results+xml`, `application/trix`

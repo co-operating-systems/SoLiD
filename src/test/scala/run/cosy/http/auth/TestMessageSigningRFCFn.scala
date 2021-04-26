@@ -19,6 +19,8 @@ import run.cosy.ldp.testUtils.StringUtils._
 import java.security.KeyFactory
 import java.security.spec.{PKCS8EncodedKeySpec, X509EncodedKeySpec}
 import java.time.Clock
+import java.security.{Signature => JSignature}
+
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}
 import scala.language.implicitConversions
@@ -48,7 +50,6 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 		)
 
 	given ec: ExecutionContext = scala.concurrent.ExecutionContext.global
-
 	given clock: Clock = Clock.fixed(java.time.Instant.ofEpochSecond(16188845000), java.time.ZoneOffset.UTC)
 
 	def expectedHeader(name: String, value: String) = Success("\""+name+"\": "+value)
@@ -152,9 +153,7 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 
 	test("2.5. Creating the Signature Input String") {
 		/**
-		 * [[https://www.ietf.org/archive/id/draft-ietf-httpbis-message-signatures-04.html#section-2.5 example request in §2.5]]
-		 *
-		 **/
+		 * [[https://www.ietf.org/archive/id/draft-ietf-httpbis-message-signatures-04.html#section-2.5 example request in §2.5]] **/
 		val rfcSigInreq = HttpRequest(
 			method = HttpMethods.GET,
 			uri = Uri("/foo"),
@@ -204,101 +203,7 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 	//
 	// signature tests
 	//
-
-	/**
-	 * Public and Private keys from [[https://www.ietf.org/archive/id/draft-ietf-httpbis-message-signatures-04.html#section-b.1.1 Message Signatures §Appendix B.1.1]]
-	 * */
-	val testKeyRSApubStr: String =
-		"""MIIBCgKCAQEAhAKYdtoeoy8zcAcR874L8cnZxKzAGwd7v36APp7Pv6Q2jdsPBRrw\
-		  |WEBnez6d0UDKDwGbc6nxfEXAy5mbhgajzrw3MOEt8uA5txSKobBpKDeBLOsdJKFq\
-		  |MGmXCQvEG7YemcxDTRPxAleIAgYYRjTSd/QBwVW9OwNFhekro3RtlinV0a75jfZg\
-		  |kne/YiktSvLG34lw2zqXBDTC5NHROUqGTlML4PlNZS5Ri2U4aCNx2rUPRcKIlE0P\
-		  |uKxI4T+HIaFpv8+rdV6eUgOrB2xeI1dSFFn/nnv5OoZJEIB+VmuKn3DCUcCZSFlQ\
-		  |PSXSfBDiUGhwOw76WuSSsf1D4b/vLoJ10wIDAQAB""".rfc8792single
-	val testKeyRSAprivStr: String =
-		"""MIIEqAIBAAKCAQEAhAKYdtoeoy8zcAcR874L8cnZxKzAGwd7v36APp7Pv6Q2jdsP\
-		  |BRrwWEBnez6d0UDKDwGbc6nxfEXAy5mbhgajzrw3MOEt8uA5txSKobBpKDeBLOsd\
-		  |JKFqMGmXCQvEG7YemcxDTRPxAleIAgYYRjTSd/QBwVW9OwNFhekro3RtlinV0a75\
-		  |jfZgkne/YiktSvLG34lw2zqXBDTC5NHROUqGTlML4PlNZS5Ri2U4aCNx2rUPRcKI\
-		  |lE0PuKxI4T+HIaFpv8+rdV6eUgOrB2xeI1dSFFn/nnv5OoZJEIB+VmuKn3DCUcCZ\
-		  |SFlQPSXSfBDiUGhwOw76WuSSsf1D4b/vLoJ10wIDAQABAoIBAG/JZuSWdoVHbi56\
-		  |vjgCgkjg3lkO1KrO3nrdm6nrgA9P9qaPjxuKoWaKO1cBQlE1pSWp/cKncYgD5WxE\
-		  |CpAnRUXG2pG4zdkzCYzAh1i+c34L6oZoHsirK6oNcEnHveydfzJL5934egm6p8DW\
-		  |+m1RQ70yUt4uRc0YSor+q1LGJvGQHReF0WmJBZHrhz5e63Pq7lE0gIwuBqL8SMaA\
-		  |yRXtK+JGxZpImTq+NHvEWWCu09SCq0r838ceQI55SvzmTkwqtC+8AT2zFviMZkKR\
-		  |Qo6SPsrqItxZWRty2izawTF0Bf5S2VAx7O+6t3wBsQ1sLptoSgX3QblELY5asI0J\
-		  |YFz7LJECgYkAsqeUJmqXE3LP8tYoIjMIAKiTm9o6psPlc8CrLI9CH0UbuaA2JCOM\
-		  |cCNq8SyYbTqgnWlB9ZfcAm/cFpA8tYci9m5vYK8HNxQr+8FS3Qo8N9RJ8d0U5Csw\
-		  |DzMYfRghAfUGwmlWj5hp1pQzAuhwbOXFtxKHVsMPhz1IBtF9Y8jvgqgYHLbmyiu1\
-		  |mwJ5AL0pYF0G7x81prlARURwHo0Yf52kEw1dxpx+JXER7hQRWQki5/NsUEtv+8RT\
-		  |qn2m6qte5DXLyn83b1qRscSdnCCwKtKWUug5q2ZbwVOCJCtmRwmnP131lWRYfj67\
-		  |B/xJ1ZA6X3GEf4sNReNAtaucPEelgR2nsN0gKQKBiGoqHWbK1qYvBxX2X3kbPDkv\
-		  |9C+celgZd2PW7aGYLCHq7nPbmfDV0yHcWjOhXZ8jRMjmANVR/eLQ2EfsRLdW69bn\
-		  |f3ZD7JS1fwGnO3exGmHO3HZG+6AvberKYVYNHahNFEw5TsAcQWDLRpkGybBcxqZo\
-		  |81YCqlqidwfeO5YtlO7etx1xLyqa2NsCeG9A86UjG+aeNnXEIDk1PDK+EuiThIUa\
-		  |/2IxKzJKWl1BKr2d4xAfR0ZnEYuRrbeDQYgTImOlfW6/GuYIxKYgEKCFHFqJATAG\
-		  |IxHrq1PDOiSwXd2GmVVYyEmhZnbcp8CxaEMQoevxAta0ssMK3w6UsDtvUvYvF22m\
-		  |qQKBiD5GwESzsFPy3Ga0MvZpn3D6EJQLgsnrtUPZx+z2Ep2x0xc5orneB5fGyF1P\
-		  |WtP+fG5Q6Dpdz3LRfm+KwBCWFKQjg7uTxcjerhBWEYPmEMKYwTJF5PBG9/ddvHLQ\
-		  |EQeNC8fHGg4UXU8mhHnSBt3EA10qQJfRDs15M38eG2cYwB1PZpDHScDnDA0=""".rfc8792single
-	val testKeyPSSPubStr: String =
-		"""MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr4tmm3r20Wd/PbqvP1s2\
-		  |+QEtvpuRaV8Yq40gjUR8y2Rjxa6dpG2GXHbPfvMs8ct+Lh1GH45x28Rw3Ry53mm+\
-		  |oAXjyQ86OnDkZ5N8lYbggD4O3w6M6pAvLkhk95AndTrifbIFPNU8PPMO7OyrFAHq\
-		  |gDsznjPFmTOtCEcN2Z1FpWgchwuYLPL+Wokqltd11nqqzi+bJ9cvSKADYdUAAN5W\
-		  |Utzdpiy6LbTgSxP7ociU4Tn0g5I6aDZJ7A8Lzo0KSyZYoA485mqcO0GVAdVw9lq4\
-		  |aOT9v6d+nb4bnNkQVklLQ3fVAvJm+xdDOp9LCNCN48V2pnDOkFV6+U9nV5oyc6XI\
-		  |2wIDAQAB""".rfc8792single
-	val testKeyPSSPrivStr: String =
-		"""MIIEvgIBADALBgkqhkiG9w0BAQoEggSqMIIEpgIBAAKCAQEAr4tmm3r20Wd/Pbqv\
-		  |P1s2+QEtvpuRaV8Yq40gjUR8y2Rjxa6dpG2GXHbPfvMs8ct+Lh1GH45x28Rw3Ry5\
-		  |3mm+oAXjyQ86OnDkZ5N8lYbggD4O3w6M6pAvLkhk95AndTrifbIFPNU8PPMO7Oyr\
-		  |FAHqgDsznjPFmTOtCEcN2Z1FpWgchwuYLPL+Wokqltd11nqqzi+bJ9cvSKADYdUA\
-		  |AN5WUtzdpiy6LbTgSxP7ociU4Tn0g5I6aDZJ7A8Lzo0KSyZYoA485mqcO0GVAdVw\
-		  |9lq4aOT9v6d+nb4bnNkQVklLQ3fVAvJm+xdDOp9LCNCN48V2pnDOkFV6+U9nV5oy\
-		  |c6XI2wIDAQABAoIBAQCUB8ip+kJiiZVKF8AqfB/aUP0jTAqOQewK1kKJ/iQCXBCq\
-		  |pbo360gvdt05H5VZ/RDVkEgO2k73VSsbulqezKs8RFs2tEmU+JgTI9MeQJPWcP6X\
-		  |aKy6LIYs0E2cWgp8GADgoBs8llBq0UhX0KffglIeek3n7Z6Gt4YFge2TAcW2WbN4\
-		  |XfK7lupFyo6HHyWRiYHMMARQXLJeOSdTn5aMBP0PO4bQyk5ORxTUSeOciPJUFktQ\
-		  |HkvGbym7KryEfwH8Tks0L7WhzyP60PL3xS9FNOJi9m+zztwYIXGDQuKM2GDsITeD\
-		  |2mI2oHoPMyAD0wdI7BwSVW18p1h+jgfc4dlexKYRAoGBAOVfuiEiOchGghV5vn5N\
-		  |RDNscAFnpHj1QgMr6/UG05RTgmcLfVsI1I4bSkbrIuVKviGGf7atlkROALOG/xRx\
-		  |DLadgBEeNyHL5lz6ihQaFJLVQ0u3U4SB67J0YtVO3R6lXcIjBDHuY8SjYJ7Ci6Z6\
-		  |vuDcoaEujnlrtUhaMxvSfcUJAoGBAMPsCHXte1uWNAqYad2WdLjPDlKtQJK1diCm\
-		  |rqmB2g8QE99hDOHItjDBEdpyFBKOIP+NpVtM2KLhRajjcL9Ph8jrID6XUqikQuVi\
-		  |4J9FV2m42jXMuioTT13idAILanYg8D3idvy/3isDVkON0X3UAVKrgMEne0hJpkPL\
-		  |FYqgetvDAoGBAKLQ6JZMbSe0pPIJkSamQhsehgL5Rs51iX4m1z7+sYFAJfhvN3Q/\
-		  |OGIHDRp6HjMUcxHpHw7U+S1TETxePwKLnLKj6hw8jnX2/nZRgWHzgVcY+sPsReRx\
-		  |NJVf+Cfh6yOtznfX00p+JWOXdSY8glSSHJwRAMog+hFGW1AYdt7w80XBAoGBAImR\
-		  |NUugqapgaEA8TrFxkJmngXYaAqpA0iYRA7kv3S4QavPBUGtFJHBNULzitydkNtVZ\
-		  |3w6hgce0h9YThTo/nKc+OZDZbgfN9s7cQ75x0PQCAO4fx2P91Q+mDzDUVTeG30mE\
-		  |t2m3S0dGe47JiJxifV9P3wNBNrZGSIF3mrORBVNDAoGBAI0QKn2Iv7Sgo4T/XjND\
-		  |dl2kZTXqGAk8dOhpUiw/HdM3OGWbhHj2NdCzBliOmPyQtAr770GITWvbAI+IRYyF\
-		  |S7Fnk6ZVVVHsxjtaHy1uJGFlaZzKR4AGNaUTOJMs6NadzCmGPAxNQQOCqoUjn4XR\
-		  |rOjr9w349JooGXhOxbu8nOxX""".rfc8792single
-
-	lazy val testKeyRSApub = {
-		java.security.Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider)
-		import java.math.BigInteger
-		import java.security.spec.RSAPublicKeySpec
-		val pkcs1PublicKey = org.bouncycastle.asn1.pkcs.RSAPublicKey.getInstance(testKeyRSApubStr.base64Decode.unsafeArray)
-		val modulus = pkcs1PublicKey.getModulus
-		val publicExponent = pkcs1PublicKey.getPublicExponent
-		val keySpec = new RSAPublicKeySpec(modulus, publicExponent)
-		KeyFactory.getInstance("RSA").generatePublic(keySpec)
-	}
-	lazy val testKeyRSAPriv = {
-		java.security.Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider)
-		KeyFactory.getInstance("RSA")
-			.generatePrivate(new PKCS8EncodedKeySpec(testKeyRSAprivStr.base64Decode.unsafeArray))
-	}
-	lazy val testKeyPSSpub = KeyFactory.getInstance("RSA")
-		.generatePublic(new X509EncodedKeySpec(testKeyPSSPubStr.base64Decode.unsafeArray))
-	lazy val testKeyPSSpriv = KeyFactory.getInstance("RSA")
-		.generatePrivate(new PKCS8EncodedKeySpec(testKeyPSSPrivStr.base64Decode.unsafeArray))
-
-
-	import java.security.{Signature => JSignature}
+	import TestMessageSigningRFCFn._
 
 	test("do the keys parse without throwing an exception?") {
 		testKeyRSApub
@@ -324,35 +229,6 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 		),
 		entity = HttpEntity(MediaTypes.`application/json`.toContentType, """{"hello": "world"}""")
 	)
-
-	lazy val `rsa-pss-sha512`: JSignature =
-		//is this the same as JWT PS512?
-		//see [[https://tools.ietf.org/html/rfc7518 JSON Web Algorithms (JWA) RFC]]
-		val rsapss = JSignature.getInstance("RSASSA-PSS")
-		import java.security.spec.{PSSParameterSpec, MGF1ParameterSpec}
-		rsapss.setParameter(new PSSParameterSpec(
-			"SHA-512", "MGF1", MGF1ParameterSpec.SHA512, 512 / 8, 1))
-		rsapss
-
-	//todo: remove dependence on JW2JCA
-	lazy val sha512rsaSig: JSignature = JW2JCA.getSignerAndVerifier("SHA512withRSA").get
-
-	lazy val `test-key-rsa-pss-sigdata`: SigningData = SigningData(testKeyPSSpriv, `rsa-pss-sha512`)
-	lazy val `test-key-rsa-sigdata`: SigningData = SigningData(testKeyRSAPriv, sha512rsaSig)
-
-	/**
-	 * emulate fetching the signature verification info for the keyids given in the Spec
-	 * */
-	def fetchSig(keyid: Rfc8941.SfString): Future[SigVerification[Keyid]] =
-		keyid.asciiStr match
-		case "test-key-rsa-pss" =>
-			FastFuture.successful(RFCSigVerificationData(testKeyPSSpub, `rsa-pss-sha512`)(keyid))
-		case "test-key-rsa" => 
-			FastFuture.successful(RFCSigVerificationData(testKeyRSApub, sha512rsaSig)(keyid))
-		case x => FastFuture.failed(new Throwable(s"can't get info on sig $x"))
-
-	/** we are using [[https://github.com/solid/authentication-panel/blob/main/proposals/HttpSignature.md HttpSig]] extension to verify Signing HTTP Messages */
-	def cred(signame: String) = GenericHttpCredentials("HttpSig", Map("name" -> signame))
 
 
 	import run.cosy.http.headers.Rfc8941.Serialise.given
@@ -531,4 +407,133 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 			Some(Success(run.cosy.http.auth.KeyidAgent("test-key-rsa-pss")))
 		)
 	}
+}
+
+object TestMessageSigningRFCFn {
+	java.security.Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider)
+
+	/**
+	 * Public and Private keys from [[https://www.ietf.org/archive/id/draft-ietf-httpbis-message-signatures-04.html#section-b.1.1 Message Signatures §Appendix B.1.1]]
+	 * Obviously, these should not be used other than for test cases!
+	 * So place them here to make them available in other tests.
+	 **/
+	val testKeyRSApubStr: String =
+		"""MIIBCgKCAQEAhAKYdtoeoy8zcAcR874L8cnZxKzAGwd7v36APp7Pv6Q2jdsPBRrw\
+		  |WEBnez6d0UDKDwGbc6nxfEXAy5mbhgajzrw3MOEt8uA5txSKobBpKDeBLOsdJKFq\
+		  |MGmXCQvEG7YemcxDTRPxAleIAgYYRjTSd/QBwVW9OwNFhekro3RtlinV0a75jfZg\
+		  |kne/YiktSvLG34lw2zqXBDTC5NHROUqGTlML4PlNZS5Ri2U4aCNx2rUPRcKIlE0P\
+		  |uKxI4T+HIaFpv8+rdV6eUgOrB2xeI1dSFFn/nnv5OoZJEIB+VmuKn3DCUcCZSFlQ\
+		  |PSXSfBDiUGhwOw76WuSSsf1D4b/vLoJ10wIDAQAB""".rfc8792single
+	val testKeyRSAprivStr: String =
+		"""MIIEqAIBAAKCAQEAhAKYdtoeoy8zcAcR874L8cnZxKzAGwd7v36APp7Pv6Q2jdsP\
+		  |BRrwWEBnez6d0UDKDwGbc6nxfEXAy5mbhgajzrw3MOEt8uA5txSKobBpKDeBLOsd\
+		  |JKFqMGmXCQvEG7YemcxDTRPxAleIAgYYRjTSd/QBwVW9OwNFhekro3RtlinV0a75\
+		  |jfZgkne/YiktSvLG34lw2zqXBDTC5NHROUqGTlML4PlNZS5Ri2U4aCNx2rUPRcKI\
+		  |lE0PuKxI4T+HIaFpv8+rdV6eUgOrB2xeI1dSFFn/nnv5OoZJEIB+VmuKn3DCUcCZ\
+		  |SFlQPSXSfBDiUGhwOw76WuSSsf1D4b/vLoJ10wIDAQABAoIBAG/JZuSWdoVHbi56\
+		  |vjgCgkjg3lkO1KrO3nrdm6nrgA9P9qaPjxuKoWaKO1cBQlE1pSWp/cKncYgD5WxE\
+		  |CpAnRUXG2pG4zdkzCYzAh1i+c34L6oZoHsirK6oNcEnHveydfzJL5934egm6p8DW\
+		  |+m1RQ70yUt4uRc0YSor+q1LGJvGQHReF0WmJBZHrhz5e63Pq7lE0gIwuBqL8SMaA\
+		  |yRXtK+JGxZpImTq+NHvEWWCu09SCq0r838ceQI55SvzmTkwqtC+8AT2zFviMZkKR\
+		  |Qo6SPsrqItxZWRty2izawTF0Bf5S2VAx7O+6t3wBsQ1sLptoSgX3QblELY5asI0J\
+		  |YFz7LJECgYkAsqeUJmqXE3LP8tYoIjMIAKiTm9o6psPlc8CrLI9CH0UbuaA2JCOM\
+		  |cCNq8SyYbTqgnWlB9ZfcAm/cFpA8tYci9m5vYK8HNxQr+8FS3Qo8N9RJ8d0U5Csw\
+		  |DzMYfRghAfUGwmlWj5hp1pQzAuhwbOXFtxKHVsMPhz1IBtF9Y8jvgqgYHLbmyiu1\
+		  |mwJ5AL0pYF0G7x81prlARURwHo0Yf52kEw1dxpx+JXER7hQRWQki5/NsUEtv+8RT\
+		  |qn2m6qte5DXLyn83b1qRscSdnCCwKtKWUug5q2ZbwVOCJCtmRwmnP131lWRYfj67\
+		  |B/xJ1ZA6X3GEf4sNReNAtaucPEelgR2nsN0gKQKBiGoqHWbK1qYvBxX2X3kbPDkv\
+		  |9C+celgZd2PW7aGYLCHq7nPbmfDV0yHcWjOhXZ8jRMjmANVR/eLQ2EfsRLdW69bn\
+		  |f3ZD7JS1fwGnO3exGmHO3HZG+6AvberKYVYNHahNFEw5TsAcQWDLRpkGybBcxqZo\
+		  |81YCqlqidwfeO5YtlO7etx1xLyqa2NsCeG9A86UjG+aeNnXEIDk1PDK+EuiThIUa\
+		  |/2IxKzJKWl1BKr2d4xAfR0ZnEYuRrbeDQYgTImOlfW6/GuYIxKYgEKCFHFqJATAG\
+		  |IxHrq1PDOiSwXd2GmVVYyEmhZnbcp8CxaEMQoevxAta0ssMK3w6UsDtvUvYvF22m\
+		  |qQKBiD5GwESzsFPy3Ga0MvZpn3D6EJQLgsnrtUPZx+z2Ep2x0xc5orneB5fGyF1P\
+		  |WtP+fG5Q6Dpdz3LRfm+KwBCWFKQjg7uTxcjerhBWEYPmEMKYwTJF5PBG9/ddvHLQ\
+		  |EQeNC8fHGg4UXU8mhHnSBt3EA10qQJfRDs15M38eG2cYwB1PZpDHScDnDA0=""".rfc8792single
+	val testKeyPSSPubStr: String =
+		"""MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr4tmm3r20Wd/PbqvP1s2\
+		  |+QEtvpuRaV8Yq40gjUR8y2Rjxa6dpG2GXHbPfvMs8ct+Lh1GH45x28Rw3Ry53mm+\
+		  |oAXjyQ86OnDkZ5N8lYbggD4O3w6M6pAvLkhk95AndTrifbIFPNU8PPMO7OyrFAHq\
+		  |gDsznjPFmTOtCEcN2Z1FpWgchwuYLPL+Wokqltd11nqqzi+bJ9cvSKADYdUAAN5W\
+		  |Utzdpiy6LbTgSxP7ociU4Tn0g5I6aDZJ7A8Lzo0KSyZYoA485mqcO0GVAdVw9lq4\
+		  |aOT9v6d+nb4bnNkQVklLQ3fVAvJm+xdDOp9LCNCN48V2pnDOkFV6+U9nV5oyc6XI\
+		  |2wIDAQAB""".rfc8792single
+	val testKeyPSSPrivStr: String =
+		"""MIIEvgIBADALBgkqhkiG9w0BAQoEggSqMIIEpgIBAAKCAQEAr4tmm3r20Wd/Pbqv\
+		  |P1s2+QEtvpuRaV8Yq40gjUR8y2Rjxa6dpG2GXHbPfvMs8ct+Lh1GH45x28Rw3Ry5\
+		  |3mm+oAXjyQ86OnDkZ5N8lYbggD4O3w6M6pAvLkhk95AndTrifbIFPNU8PPMO7Oyr\
+		  |FAHqgDsznjPFmTOtCEcN2Z1FpWgchwuYLPL+Wokqltd11nqqzi+bJ9cvSKADYdUA\
+		  |AN5WUtzdpiy6LbTgSxP7ociU4Tn0g5I6aDZJ7A8Lzo0KSyZYoA485mqcO0GVAdVw\
+		  |9lq4aOT9v6d+nb4bnNkQVklLQ3fVAvJm+xdDOp9LCNCN48V2pnDOkFV6+U9nV5oy\
+		  |c6XI2wIDAQABAoIBAQCUB8ip+kJiiZVKF8AqfB/aUP0jTAqOQewK1kKJ/iQCXBCq\
+		  |pbo360gvdt05H5VZ/RDVkEgO2k73VSsbulqezKs8RFs2tEmU+JgTI9MeQJPWcP6X\
+		  |aKy6LIYs0E2cWgp8GADgoBs8llBq0UhX0KffglIeek3n7Z6Gt4YFge2TAcW2WbN4\
+		  |XfK7lupFyo6HHyWRiYHMMARQXLJeOSdTn5aMBP0PO4bQyk5ORxTUSeOciPJUFktQ\
+		  |HkvGbym7KryEfwH8Tks0L7WhzyP60PL3xS9FNOJi9m+zztwYIXGDQuKM2GDsITeD\
+		  |2mI2oHoPMyAD0wdI7BwSVW18p1h+jgfc4dlexKYRAoGBAOVfuiEiOchGghV5vn5N\
+		  |RDNscAFnpHj1QgMr6/UG05RTgmcLfVsI1I4bSkbrIuVKviGGf7atlkROALOG/xRx\
+		  |DLadgBEeNyHL5lz6ihQaFJLVQ0u3U4SB67J0YtVO3R6lXcIjBDHuY8SjYJ7Ci6Z6\
+		  |vuDcoaEujnlrtUhaMxvSfcUJAoGBAMPsCHXte1uWNAqYad2WdLjPDlKtQJK1diCm\
+		  |rqmB2g8QE99hDOHItjDBEdpyFBKOIP+NpVtM2KLhRajjcL9Ph8jrID6XUqikQuVi\
+		  |4J9FV2m42jXMuioTT13idAILanYg8D3idvy/3isDVkON0X3UAVKrgMEne0hJpkPL\
+		  |FYqgetvDAoGBAKLQ6JZMbSe0pPIJkSamQhsehgL5Rs51iX4m1z7+sYFAJfhvN3Q/\
+		  |OGIHDRp6HjMUcxHpHw7U+S1TETxePwKLnLKj6hw8jnX2/nZRgWHzgVcY+sPsReRx\
+		  |NJVf+Cfh6yOtznfX00p+JWOXdSY8glSSHJwRAMog+hFGW1AYdt7w80XBAoGBAImR\
+		  |NUugqapgaEA8TrFxkJmngXYaAqpA0iYRA7kv3S4QavPBUGtFJHBNULzitydkNtVZ\
+		  |3w6hgce0h9YThTo/nKc+OZDZbgfN9s7cQ75x0PQCAO4fx2P91Q+mDzDUVTeG30mE\
+		  |t2m3S0dGe47JiJxifV9P3wNBNrZGSIF3mrORBVNDAoGBAI0QKn2Iv7Sgo4T/XjND\
+		  |dl2kZTXqGAk8dOhpUiw/HdM3OGWbhHj2NdCzBliOmPyQtAr770GITWvbAI+IRYyF\
+		  |S7Fnk6ZVVVHsxjtaHy1uJGFlaZzKR4AGNaUTOJMs6NadzCmGPAxNQQOCqoUjn4XR\
+		  |rOjr9w349JooGXhOxbu8nOxX""".rfc8792single
+
+	lazy val testKeyRSApub = {
+		java.security.Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider)
+		import java.math.BigInteger
+		import java.security.spec.RSAPublicKeySpec
+		val pkcs1PublicKey = org.bouncycastle.asn1.pkcs.RSAPublicKey.getInstance(testKeyRSApubStr.base64Decode.unsafeArray)
+		val modulus = pkcs1PublicKey.getModulus
+		val publicExponent = pkcs1PublicKey.getPublicExponent
+		val keySpec = new RSAPublicKeySpec(modulus, publicExponent)
+		KeyFactory.getInstance("RSA").generatePublic(keySpec)
+	}
+	lazy val testKeyRSAPriv = {
+		KeyFactory.getInstance("RSA")
+			.generatePrivate(new PKCS8EncodedKeySpec(testKeyRSAprivStr.base64Decode.unsafeArray))
+	}
+	lazy val testKeyPSSpub = KeyFactory.getInstance("RSA")
+		.generatePublic(new X509EncodedKeySpec(testKeyPSSPubStr.base64Decode.unsafeArray))
+	lazy val testKeyPSSpriv = KeyFactory.getInstance("RSA")
+		.generatePrivate(new PKCS8EncodedKeySpec(testKeyPSSPrivStr.base64Decode.unsafeArray))
+
+	lazy val `rsa-pss-sha512`: JSignature =
+		//is this the same as JWT PS512?
+		//see [[https://tools.ietf.org/html/rfc7518 JSON Web Algorithms (JWA) RFC]]
+		val rsapss = JSignature.getInstance("RSASSA-PSS")
+		import java.security.spec.{PSSParameterSpec, MGF1ParameterSpec}
+		rsapss.setParameter(new PSSParameterSpec(
+			"SHA-512", "MGF1", MGF1ParameterSpec.SHA512, 512 / 8, 1))
+		rsapss
+
+	//todo: remove dependence on JW2JCA
+	lazy val sha512rsaSig: JSignature = JW2JCA.getSignerAndVerifier("SHA512withRSA").get
+
+	lazy val `test-key-rsa-pss-sigdata`: SigningData = SigningData(testKeyPSSpriv, `rsa-pss-sha512`)
+	lazy val `test-key-rsa-sigdata`: SigningData = SigningData(testKeyRSAPriv, sha512rsaSig)
+
+	/**
+	 * emulate fetching the signature verification info for the keyids given in the Spec
+	 * */
+	def fetchSig(keyid: Rfc8941.SfString): Future[SigVerification[Keyid]] =
+		keyid.asciiStr match
+			case "test-key-rsa-pss" =>
+				FastFuture.successful(RFCSigVerificationData(testKeyPSSpub, `rsa-pss-sha512`)(keyid))
+			case "test-key-rsa" =>
+				FastFuture.successful(RFCSigVerificationData(testKeyRSApub, sha512rsaSig)(keyid))
+			case x => FastFuture.failed(new Throwable(s"can't get info on sig $x"))
+
+	/** we are using [[https://github.com/solid/authentication-panel/blob/main/proposals/HttpSignature.md HttpSig]]
+	 * extension to verify Signing HTTP Messages */
+	def cred(signame: String) = GenericHttpCredentials("HttpSig", Map("name" -> signame))
+
+
 }
