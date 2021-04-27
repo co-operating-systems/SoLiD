@@ -17,6 +17,7 @@ import run.cosy.http.headers.akka.date.collate
 import run.cosy.http.auth.MessageSignature._
 import run.cosy.ldp.testUtils.StringUtils._
 
+import java.nio.charset.StandardCharsets
 import java.security.KeyFactory
 import java.security.spec.{PKCS8EncodedKeySpec, X509EncodedKeySpec}
 import java.time.Clock
@@ -284,6 +285,28 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 			keyIdReady.value,
 			Some(Success(run.cosy.http.auth.KeyidAgent("test-key-rsa-pss")))
 		)
+	}
+
+	test("B.2.2 Header Coverage - Spec Test") {
+		import java.util.Base64
+		val sigInputStr =
+			""""host": example.com
+			  |"date": Tue, 20 Apr 2021 02:07:55 GMT
+			  |"content-type": application/json
+			  |"@signature-params": ("host" "date" "content-type");created=1618884475;keyid="test-key-rsa-pss"""".stripMargin
+		val signature = "NtIKWuXjr4SBEXj97gbick4O95ff378I0CZOa2VnIeEXZ1itzAdqTp"+
+			 "SvG91XYrq5CfxCmk8zz1Zg7ZGYD+ngJyVn805r73rh2eFCPO+ZXDs45Is/Ex8srzGC9sf"+
+			"VZfqeEfApRFFe5yXDmANVUwzFWCEnGM6+SJVmWl1/jyEn45qA6Hw+ZDHbrbp6qvD4N0S9"+
+			"2jlPyVVEh/SmCwnkeNiBgnbt+E0K5wCFNHPbo4X1Tj406W+bTtnKzaoKxBWKW8aIQ7rg9"+
+			"2zqE1oqBRjqtRi5/Q6P5ZYYGGINKzNyV3UjZtxeZNnNJ+MAnWS0mofFqcZHVgSU/1wUzP"+
+			"7MhzOKLca1Yg=="
+		println(signature)
+		val sigBytes = Base64.getDecoder.decode(signature)
+
+		val javaSig = `rsa-pss-sha512`
+		javaSig.initVerify(testKeyPSSpub)
+		javaSig.update(sigInputStr.getBytes(StandardCharsets.US_ASCII))
+		assert(javaSig.verify(sigBytes.toArray))
 	}
 
 	test("B.2.2. Header Coverage") {
