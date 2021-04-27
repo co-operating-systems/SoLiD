@@ -8,7 +8,6 @@ import Rfc8941._
 import Rfc8941.SyntaxHelper._
 import akka.http.scaladsl.util.FastFuture
 import com.nimbusds.jose.JWSAlgorithm
-import org.bouncycastle.jce.provider.BouncyCastleProvider
 
 import scala.concurrent.{Await, Future}
 import run.cosy.http.headers.akka.{AkkaDictSelector, AkkaHeaderSelector, UntypedAkkaSelector}
@@ -22,6 +21,7 @@ import java.security.KeyFactory
 import java.security.spec.{PKCS8EncodedKeySpec, X509EncodedKeySpec}
 import java.time.Clock
 import java.security.{Signature => JSignature}
+import java.util.Base64
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}
 import scala.language.implicitConversions
@@ -213,10 +213,35 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 		testKeyPSSpriv
 	}
 
-	test("4.3 Multiple Signatures") {
-		// the example in 4.3 is very interesting,
-		//  BUT it is missing the request on which it is built,
-		//  AND it is broken: the x-forwarded-for header name is not surrounded by "..."
+	test("4.3 Multiple Signatures - spec test") {
+		import java.util.Base64
+
+		// let's test the [[https://github.com/httpwg/http-extensions/issues/1493#issuecomment-827103670 fix to version 04. of the spec]]
+		val sigInputStr: String =
+			""""signature";key="sig1": \
+			|  :YlizxWySaL8RiCQOWpl/8TBLlinl/O9K5n+WCYladKkRfmZ4wdo42ikCrepkIoPd\
+			|  csPIx5wYc53Kpq6PLmv3fRk/+BtFSJNdrfClMEg4kX8utYuMQhBHSLiEiDRjNSTWX\
+			|  Wk8hwutEGijbna3FvBVzy1oa5tT08w/ffN7d/6dup1FWVt90KhK1Cx3RkQveMxAKC\
+			|  3HH6Q26lAgJ54MyLqLrLXcjQKWhjWzkMkVjho4JLy87GTU6k4eIQxB4xDHbavbJKE\
+			|  jS0Vlg2pqmcUkGVdL4zQ3NOOttIlKC1HL1SodXNd7UBM0C0R1GGqEi4Lsm9UKWuQP\
+			|  vPFTW7qIgvjAthv/lA==:
+			|"x-forwarded-for": 192.0.2.123
+			|"@signature-params": ("signature";key="sig1" "x-forwarded-for")\
+			|  ;created=1618884480;keyid="test-key-rsa";alg="rsa-v1_5-sha256"""".rfc8792single
+		val proxySig: String =
+			"""FSqkfwt17TLKqjjWrW9vf6a/r3329amAO3e7ByjkT60jjFTq4xdO74\
+		  |    JTHrpz6DMSlQOKmhIiz8mq7T5SYOjfUZrKXpbP6jUFTStUa4HvNNvjhZc1jiHk9\
+		  |    IhGGPPeOdRcTrzjDxSS+2l7G3nSpJ4t2LjtLnEPa1FIldgnJqwIa0SCiEPWFmnJ\
+		  |    fTdc4VW2ngvYhuKUKFz/Jyx0GfmKQ4lAWxQwVtqRSURTscdY3VvxR+GpydqF8gQ\
+		  |    U8iYslRHlRxBh+29cADAHVnT5j1iBkVdAfLS59xCYLnUc3UG7UfxU6kU1QgJ+2n\
+		  |    A5NNQsxXeREcCFTe2FnjOy2atxG8bm+O8ZcA==""".rfc8792single
+
+		val sigBytes = Base64.getDecoder.decode(proxySig)
+
+		val javaSig = sha512rsaSig
+		javaSig.initVerify(testKeyRSApub)
+		javaSig.update(sigInputStr.getBytes(StandardCharsets.US_ASCII))
+		assert(javaSig.verify(sigBytes.toArray))
 	}
 	
 	/** example from [[https://www.ietf.org/archive/id/draft-ietf-httpbis-message-signatures-04.html#section-b.2
@@ -527,9 +552,9 @@ object TestMessageSigningRFCFn {
 		KeyFactory.getInstance("RSA")
 			.generatePrivate(new PKCS8EncodedKeySpec(testKeyRSAprivStr.base64Decode.unsafeArray))
 	}
-	lazy val testKeyPSSpub = KeyFactory.getInstance("RSASSA-PSS")
+	lazy val testKeyPSSpub = KeyFactory.getInstance("RSA")
 		.generatePublic(new X509EncodedKeySpec(testKeyPSSPubStr.base64Decode.unsafeArray))
-	lazy val testKeyPSSpriv = KeyFactory.getInstance("RSA")
+	lazy val testKeyPSSpriv = KeyFactory.getInstance("RSASSA-PSS")
 		.generatePrivate(new PKCS8EncodedKeySpec(testKeyPSSPrivStr.base64Decode.unsafeArray))
 
 	/** one always has to create a new signature on each verification if in multi-threaded environement */
@@ -545,7 +570,7 @@ object TestMessageSigningRFCFn {
 		rsapss
 
 	//todo: remove dependence on JW2JCA
-	def sha512rsaSig: JSignature = JW2JCA.getSignerAndVerifier("SHA512withRSA").get
+	def sha512rsaSig: JSignature = JW2JCA.getSignerAndVerifier("SHA256withRSA").get
 
 	/** Sigdata should always be new too in multithreaded environements, as it uses stateful signatures. */
 	def `test-key-rsa-pss-sigdata`: SigningData = SigningData(testKeyPSSpriv, `rsa-pss-sha512`)
