@@ -13,7 +13,7 @@ import akka.http.scaladsl.server.directives.AuthenticationResult.{failWithChalle
 import akka.http.scaladsl.util.FastFuture
 import run.cosy.http.auth.{Agent, KeyidAgent}
 
-import java.nio.charset.{Charset, StandardCharsets}
+import java.nio.charset.StandardCharsets
 import java.security.{PrivateKey, PublicKey}
 import java.time.{Clock, Instant}
 import java.util.Locale

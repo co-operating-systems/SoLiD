@@ -8,7 +8,6 @@ import cats.parse.Parser
 import com.nimbusds.jose.util.Base64
 import run.cosy.http.{BetterCustomHeader, BetterCustomHeaderCompanion, HTTPHeaderParseException, UnableToCreateSigHeaderException}
 
-import java.nio.charset.StandardCharsets
 import java.security.{PrivateKey, PublicKey, Signature}
 import java.time.Instant
 import scala.collection.immutable.ListMap

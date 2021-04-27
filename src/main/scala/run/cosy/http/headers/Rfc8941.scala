@@ -6,7 +6,6 @@ import run.cosy.http.WebException
 import run.cosy.http.headers.Rfc8941.Serialise.Serialise
 
 import java.math.{MathContext, RoundingMode}
-import java.nio.charset.{Charset, StandardCharsets}
 import java.util.Base64
 import scala.collection.immutable.{ArraySeq, ListMap}
 import scala.reflect.TypeTest

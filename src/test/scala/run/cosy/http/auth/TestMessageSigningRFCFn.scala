@@ -311,7 +311,7 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 			  |  VZfqeEfApRFFe5yXDmANVUwzFWCEnGM6+SJVmWl1/jyEn45qA6Hw+ZDHbrbp6qvD4N0S9\
 			  |  2jlPyVVEh/SmCwnkeNiBgnbt+E0K5wCFNHPbo4X1Tj406W+bTtnKzaoKxBWKW8aIQ7rg9\
 			  |  2zqE1oqBRjqtRi5/Q6P5ZYYGGINKzNyV3UjZtxeZNnNJ+MAnWS0mofFqcZHVgSU/1wUzP\
-			  |  7MhzOKLca1Yg==:""".stripMargin.rfc8792single
+			  |  7MhzOKLca1Yg==:""".rfc8792single
 		val Success(sig1) = Signature.parse(signatureStr)
 		assertEquals(sig1.sigmap.canon,signatureStr)
 

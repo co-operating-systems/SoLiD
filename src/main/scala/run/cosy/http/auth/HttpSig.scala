@@ -17,7 +17,6 @@ import run.cosy.http.headers.Rfc8941
 import run.cosy.http.{InvalidCreatedFieldException, InvalidExpiresFieldException, InvalidSigException}
 
 import java.net.URI
-import java.nio.charset.StandardCharsets
 import java.security.{PrivateKey, PublicKey, Signature => JSignature}
 import java.time.{Clock, Instant}
 import java.util

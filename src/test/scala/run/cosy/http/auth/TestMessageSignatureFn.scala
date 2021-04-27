@@ -108,7 +108,7 @@ class TestMessageSignatureFn extends munit.FunSuite {
 			given clock: Clock = Clock.fixed(java.time.Instant.ofEpochSecond(1402170700), java.time.ZoneOffset.UTC)
 
 			//we create the credential object to test the signature
-			val cred = GenericHttpCredentials("HttpSig", Map("name"->sigName))
+			val cred = GenericHttpCredentials("HttpSig", Map("proof"->sigName))
 
 			//note: we don't need to add `cred` to the message in an Authorization header. We can just use it
 			//  to test our function.

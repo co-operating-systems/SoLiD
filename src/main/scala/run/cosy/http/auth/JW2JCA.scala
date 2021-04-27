@@ -7,7 +7,6 @@ import com.nimbusds.jose.jwk.{AsymmetricJWK, ECKey, JWK, RSAKey}
 import com.nimbusds.jose.util.Base64
 import run.cosy.http.CryptoException
 
-import java.nio.charset.{Charset, StandardCharsets}
 import java.security.{PrivateKey, Provider, PublicKey, Signature}
 import scala.util.{Failure, Try}
 import akka.http.scaladsl.model.Uri
