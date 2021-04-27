@@ -49,6 +49,7 @@ object StringUtils:
 				case e: HttpEntity if e.contentType != ContentTypes.NoContentType =>
 					("Content-Type: "+e.contentType) ::
 					e.contentLengthOption.map("Content-Length: "+_).toList
+				case _ => List()
 			(l ::: ct).mkString("\n")
 
 

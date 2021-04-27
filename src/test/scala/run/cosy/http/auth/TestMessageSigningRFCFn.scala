@@ -1,17 +1,18 @@
 package run.cosy.http.auth
 
 import akka.http.scaladsl.model.{DateTime, HttpEntity, HttpMessage, HttpMethods, HttpRequest, MediaTypes, Uri}
-import akka.http.scaladsl.model.headers.{CacheDirectives, Date, GenericHttpCredentials, Host, RawHeader, `Cache-Control`}
+import akka.http.scaladsl.model.headers.{`Cache-Control`, CacheDirectives, Date, GenericHttpCredentials, Host, RawHeader}
 import run.cosy.http.headers.{Rfc8941, SelectorOps, SigInput}
-import run.cosy.http.headers.{SigInputs, Signature, Signatures, `Signature-Input`}
+import run.cosy.http.headers.{`Signature-Input`, SigInputs, Signature, Signatures}
 import Rfc8941._
 import Rfc8941.SyntaxHelper._
 import akka.http.scaladsl.util.FastFuture
+import com.nimbusds.jose.JWSAlgorithm
+import org.bouncycastle.jce.provider.BouncyCastleProvider
 
 import scala.concurrent.{Await, Future}
-import run.cosy.http.headers.akka.{AkkaHeaderSelector, UntypedAkkaSelector,  AkkaDictSelector}
-import run.cosy.http.headers.akka.{`@request-target`, `cache-control`, `content-length`, `content-type`,
-	`digest`, date, etag, host}
+import run.cosy.http.headers.akka.{AkkaDictSelector, AkkaHeaderSelector, UntypedAkkaSelector}
+import run.cosy.http.headers.akka.{`@request-target`, `cache-control`, `content-length`, `content-type`, `digest`, date, etag, host}
 import run.cosy.http.headers.akka.date.collate
 import run.cosy.http.auth.MessageSignature._
 import run.cosy.ldp.testUtils.StringUtils._
@@ -20,7 +21,6 @@ import java.security.KeyFactory
 import java.security.spec.{PKCS8EncodedKeySpec, X509EncodedKeySpec}
 import java.time.Clock
 import java.security.{Signature => JSignature}
-
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}
 import scala.language.implicitConversions
@@ -511,15 +511,14 @@ object TestMessageSigningRFCFn {
 
 	/** one always has to create a new signature on each verification if in multi-threaded environement */
 	def `rsa-pss-sha512`: JSignature =
-		//is this the same as JWT PS512?
-		//see [[https://tools.ietf.org/html/rfc7518 JSON Web Algorithms (JWA) RFC]]
+//	   also tried see [[https://tools.ietf.org/html/rfc7518 JSON Web Algorithms (JWA) RFC]]
+//		com.nimbusds.jose.crypto.impl.RSASSA.getSignerAndVerifier(JWSAlgorithm.PS512, new BouncyCastleProvider() )
 		val rsapss = JSignature.getInstance("RSASSA-PSS")
 		import java.security.spec.{PSSParameterSpec, MGF1ParameterSpec}
 		val pssSpec = new PSSParameterSpec(
 			"SHA-512", "MGF1", MGF1ParameterSpec.SHA512, 512 / 8, 1)
 		println("PSSParameterSpec="+pssSpec)
 		rsapss.setParameter(pssSpec)
-		println("RSASSA-PSS with params="+rsapss.toString)
 		rsapss
 
 	//todo: remove dependence on JW2JCA

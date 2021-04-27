@@ -19,7 +19,7 @@ object Dependencies {
 		val scalatest = "3.2.8"
 		val tomitribeHttpSig = "1.7"
 		val titaniumJSonLD = "1.0.0"
-		val nimbusDS = "9.8"
+		val nimbusDS = "9.9"
 		val logback = "1.2.3"
 		val apacheCommonsCodec = "1.15"
 	}
