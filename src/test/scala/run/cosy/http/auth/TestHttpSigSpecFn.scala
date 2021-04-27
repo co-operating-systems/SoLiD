@@ -39,14 +39,13 @@ class TestHttpSigSpecFn extends munit.FunSuite {
 	)
 
 	val req1Ex = HttpRequest(GET, Uri("/comments/"), Seq(
-		Authorization(GenericHttpCredentials("HttpSig",Map("key"->"sig1"))),
+		Authorization(GenericHttpCredentials("HttpSig",Map("proof"->"sig1","cred"->"https://age.com/cred/xyz#"))),
 		Accept(`text/turtle`.withQValue(1.0), exMediaRanges*)
 		))
 
 	given ec: ExecutionContext = scala.concurrent.ExecutionContext.global
 	given clock: Clock = Clock.fixed(java.time.Instant.ofEpochSecond(16188845000), java.time.ZoneOffset.UTC)
-	import run.cosy.http.headers.akka.akkaSelectorOps.given
-	import run.cosy.http.headers.akka.given
+	import run.cosy.http.headers.akka.{given,_}
 	val t = java.time.LocalDateTime.of(2021, Month.APRIL, 01, 8, 30)
 	val t2 = java.time.LocalDateTime.of(2021, Month.APRIL, 01, 23, 45)
 	val pubkeyPEM = """-----BEGIN RSA PUBLIC KEY-----
@@ -58,24 +57,24 @@ class TestHttpSigSpecFn extends munit.FunSuite {
 							|PSXSfBDiUGhwOw76WuSSsf1D4b/vLoJ10wIDAQAB
 							|-----END RSA PUBLIC KEY-----""".stripMargin
 	test("intro example") {
-		val Some(si) = SigInput(IList(sf"@request-target")(
+		val Some(si) = SigInput(IList(`@request-target`.sf, authorization.sf)(
 			Token("keyid") -> sf"/keys/alice#",
 			Token("created") -> SfInt(t.toInstant(ZoneOffset.UTC).toEpochMilli/1000),
 			Token("expires") -> SfInt(t2.toInstant(ZoneOffset.UTC).toEpochMilli/1000)
 		))
 		val Success(req1signingStr) = req1Ex.signingString(si)
 		val Success(req1signed) = req1Ex.withSigInput(Rfc8941.Token("sig1"),si).flatMap(_(`test-key-rsa-pss-sigdata`))
-		println("\n----401 response----")
+		println("----401 response----")
 		println(resp1Ex.documented.toRfc8792single())
-		println("\n---signing string----")
-		println(req1signingStr.toRfc8792single())
-		println("\n----request to be signed----")
+		println("----partial request to be signed---")
 		println(req1Ex.documented.toRfc8792single())
-		println("\n----signed request----")
+		println("---signing string----")
+		println(req1signingStr.toRfc8792single())
+		println("----signed request----")
 		println(req1signed.documented.toRfc8792single())
 		import com.nimbusds.jose.jwk.JWK
 		val jwk = JWK.parseFromPEMEncodedObjects(pubkeyPEM)
-		println("\n----json public key---")
+		println("----json public key---")
 		println(jwk.toJSONString)
 		//println(sigReq.get.documented)
 	}

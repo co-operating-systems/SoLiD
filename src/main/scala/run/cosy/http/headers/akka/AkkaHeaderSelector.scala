@@ -86,12 +86,11 @@ trait AkkaListSelector extends ListSelector[HttpHeader] with UntypedAkkaSelector
 	override def signingString(msg: HttpHeader, prefix: Rfc8941.SfInt): Try[String] = ???
 //	override def signingString(msg: HttpHeader): Try[String] = ???
 
+object authorization extends TypedAkkaSelector[Authorization]:
+	def akkaCompanion = Authorization
 
-object signature extends AkkaDictSelector:
-	override val lowercaseName: String = "signature"
-
-object host extends TypedAkkaSelector[Host]:
-	def akkaCompanion = Host
+object `cache-control` extends TypedAkkaSelector[`Cache-Control`]:
+	def akkaCompanion = `Cache-Control`
 
 object date extends TypedAkkaSelector[Date]:
 	def akkaCompanion = Date
@@ -99,8 +98,11 @@ object date extends TypedAkkaSelector[Date]:
 object etag extends TypedAkkaSelector[ETag]:
 	def akkaCompanion = ETag
 
-object `cache-control` extends TypedAkkaSelector[`Cache-Control`]:
-	def akkaCompanion = `Cache-Control`
+object host extends TypedAkkaSelector[Host]:
+	def akkaCompanion = Host
+
+object signature extends AkkaDictSelector:
+	override val lowercaseName: String = "signature"
 
 /** Content-Type is special in Akka, as it is associated with the entity body,
  * and is not modelled as a header */
@@ -150,4 +152,5 @@ object `@request-target` extends AkkaHeaderSelector:
 			UnableToCreateSigHeaderException("cannot build @request-target for response message"))
 
 given akkaSelectorOps: SelectorOps[HttpMessage] =
-	SelectorOps(host,date,etag,`cache-control`,`content-type`,`content-length`,`digest`,`@request-target`)
+	SelectorOps(authorization,`cache-control`,`content-type`,`content-length`,
+		date,`digest`,etag,host,`@request-target`)

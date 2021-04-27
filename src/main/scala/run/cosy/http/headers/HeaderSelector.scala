@@ -14,6 +14,7 @@ import headers.SigInput
  **/
 trait HeaderSelector[HttpMessage] {
 	def lowercaseName: String
+	lazy val sf = Rfc8941.SfString(lowercaseName)
 	lazy val special: Boolean = lowercaseName.startsWith("@")
 	def valid(params: Rfc8941.Params): Boolean = params.isEmpty
 	/**

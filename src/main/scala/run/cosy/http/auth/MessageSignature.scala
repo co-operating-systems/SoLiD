@@ -123,8 +123,8 @@ object MessageSignature {
 		): PartialFunction[GenericHttpCredentials,Future[Kid]] =
 			case GenericHttpCredentials("HttpSig", _, params) =>
 				val tr = for {
-					name <- params.get("name")
-							.toRight(InvalidSigException("HttpSig auth needs 'name' parameter")).toTry
+					name <- params.get("proof")
+							.toRight(InvalidSigException("HttpSig auth needs 'proof' parameter with value the sig name")).toTry
 					tkName <- Try(Rfc8941.Token(name)) //todo: tighter input function should move this test out of here
 					(si: SigInput, sig: Bytes) <- msg.getSignature(tkName)
 							.toRight(InvalidSigException(

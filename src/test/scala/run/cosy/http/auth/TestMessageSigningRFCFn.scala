@@ -187,8 +187,8 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 							  |  keyid="test-key-rsa-pss"""".rfc8792single
 
 		val sigInIlist = IList(
-			sf"@request-target", sf"host",sf"date",sf"cache-control",
-			sf"x-empty-header",sf"x-example"
+			`@request-target`.sf, host.sf,date.sf,`cache-control`.sf,
+			`x-empty-header`.sf,`x-example`.sf
 		)(
 			Token("created") -> SfInt(1618884475),
 			Token("keyid") -> sf"test-key-rsa-pss"
@@ -262,7 +262,7 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 			`Signature-Input`(SigInputs(Token("sig1"), sigIn)))
 			.addHeader(Signature(sigs.get))
 		val verifiedKeyId = Await.ready(
-			specReq.signatureAuthN(fetchSig)(cred("sig1")),
+			specReq.signatureAuthN(keyidFetcher)(cred("sig1")),
 			2.seconds
 		)
 // todo: this does not work. Is it the crypto algorith that is wrong or the example in the spec?
@@ -278,7 +278,7 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 		val newReq = rfcAppdxB2Req.withSigInput(Token("sig1"), sigIn)
 			.flatMap(_(`test-key-rsa-pss-sigdata`))
 
-		val futureKeyId = newReq.get.signatureAuthN(fetchSig)(cred("sig1"))
+		val futureKeyId = newReq.get.signatureAuthN(keyidFetcher)(cred("sig1"))
 		val keyIdReady = Await.ready(futureKeyId, 2.seconds)
 		assertEquals(
 			keyIdReady.value,
@@ -291,7 +291,7 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 		val sigParametersExpected =
 			"""("host" "date" "content-type");created=1618884475\
 			  |  ;keyid="test-key-rsa-pss"""".rfc8792single
-		val Some(sigIn) = SigInput[HttpMessage](IList(sf"host",sf"date",sf"content-type")(
+		val Some(sigIn) = SigInput[HttpMessage](IList(host.sf,date.sf,`content-type`.sf)(
 			Token("created") -> SfInt(1618884475),
 			Token("keyid") -> sf"test-key-rsa-pss"))
 		assertEquals(sigIn.canon, sigParametersExpected)
@@ -319,15 +319,19 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 		val specReq = rfcAppdxB2Req.addHeader(
 			`Signature-Input`(SigInputs(Token("sig1"), sigIn)))
 			.addHeader(Signature(sig1))
+		//verify that the new req still has the same signing string as expected
+		assertEquals(specReq.signingString(sigIn),Success(sigInputStrExpected))
+
+		println(specReq.documented)
 		val verifiedKeyId = Await.ready(
-			specReq.signatureAuthN(fetchSig)(cred("sig1")),
+			specReq.signatureAuthN(keyidFetcher)(cred("sig1")),
 			2.seconds
 		)
 // todo: this does not work. Is it the crypto algorith that is wrong or the example in the spec?
-//		assertEquals(
-//			verifiedKeyId.value,
-//			Some(Success(run.cosy.http.auth.KeyidAgent("test-key-rsa-pss")))
-//		)
+		assertEquals(
+			verifiedKeyId.value,
+			Some(Success(run.cosy.http.auth.KeyidAgent("test-key-rsa-pss")))
+		)
 
 		//4. create our own signature and test that.
 		//   note: RSASSA returns different signatures at different times. So we run it again
@@ -336,7 +340,7 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 		val newReq = rfcAppdxB2Req.withSigInput(Token("sig1"), sigIn)
 			.flatMap(_(`test-key-rsa-pss-sigdata`))
 
-		val futureKeyId = newReq.get.signatureAuthN(fetchSig)(cred("sig1"))
+		val futureKeyId = newReq.get.signatureAuthN(keyidFetcher)(cred("sig1"))
 		val keyIdReady = Await.ready(futureKeyId, 2.seconds)
 		assertEquals(
 			keyIdReady.value,
@@ -351,7 +355,7 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 			  |  "digest" "content-length");created=1618884475\
 			  |  ;keyid="test-key-rsa-pss"""".rfc8792single
 		val Some(sigIn) = SigInput[HttpMessage](IList(
-			sf"@request-target",sf"host",sf"date",sf"content-type",sf"digest",sf"content-length")(
+			`@request-target`.sf,host.sf,date.sf,`content-type`.sf,digest.sf,`content-length`.sf)(
 			Token("created") -> SfInt(1618884475),
 			Token("keyid") -> sf"test-key-rsa-pss"))
 		assertEquals(sigIn.canon, sigParametersExpected)
@@ -375,7 +379,7 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 			  |  ONnyR/8yuIh3bOXfc/NYJ3KLNaWR6MKrGinCYKTNwrX/0V67EMdSgd5HHnW5xHFgKfRCj\
 			  |  rG3ncV+jbaeSPJ8e96RZgr8slcdwmqXdiwiIBCQDKRIQ3U2muJWvxyjV/IYhCTwAXJaUz\
 			  |  sQPKzR5QWelXEVdHyv4WIB2lKaYh7mAsz0/ANxFYRRSp2Joms0OAnIAFX9kKCSp4p15/Q\
-			  |  8L9vSIGNpQtw==:""".stripMargin.rfc8792single
+			  |  8L9vSIGNpQtw==:""".rfc8792single
 		val Success(sig1) = Signature.parse(signatureStr)
 		assertEquals(sig1.sigmap.canon,signatureStr)
 
@@ -384,7 +388,7 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 			`Signature-Input`(SigInputs(Token("sig1"), sigIn)))
 			.addHeader(Signature(sig1))
 		val verifiedKeyId = Await.ready(
-			specReq.signatureAuthN(fetchSig)(cred("sig1")),
+			specReq.signatureAuthN(keyidFetcher)(cred("sig1")),
 			2.seconds
 		)
 		// todo: this does not work. Is it the crypto algorith that is wrong or the example in the spec?
@@ -400,7 +404,7 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 		val newReq = rfcAppdxB2Req.withSigInput(Token("sig1"), sigIn)
 			.flatMap(_(`test-key-rsa-pss-sigdata`))
 
-		val futureKeyId = newReq.get.signatureAuthN(fetchSig)(cred("sig1"))
+		val futureKeyId = newReq.get.signatureAuthN(keyidFetcher)(cred("sig1"))
 		val keyIdReady = Await.ready(futureKeyId, 2.seconds)
 		assertEquals(
 			keyIdReady.value,
@@ -500,30 +504,35 @@ object TestMessageSigningRFCFn {
 		KeyFactory.getInstance("RSA")
 			.generatePrivate(new PKCS8EncodedKeySpec(testKeyRSAprivStr.base64Decode.unsafeArray))
 	}
-	lazy val testKeyPSSpub = KeyFactory.getInstance("RSA")
+	lazy val testKeyPSSpub = KeyFactory.getInstance("RSASSA-PSS")
 		.generatePublic(new X509EncodedKeySpec(testKeyPSSPubStr.base64Decode.unsafeArray))
 	lazy val testKeyPSSpriv = KeyFactory.getInstance("RSA")
 		.generatePrivate(new PKCS8EncodedKeySpec(testKeyPSSPrivStr.base64Decode.unsafeArray))
 
-	lazy val `rsa-pss-sha512`: JSignature =
+	/** one always has to create a new signature on each verification if in multi-threaded environement */
+	def `rsa-pss-sha512`: JSignature =
 		//is this the same as JWT PS512?
 		//see [[https://tools.ietf.org/html/rfc7518 JSON Web Algorithms (JWA) RFC]]
 		val rsapss = JSignature.getInstance("RSASSA-PSS")
 		import java.security.spec.{PSSParameterSpec, MGF1ParameterSpec}
-		rsapss.setParameter(new PSSParameterSpec(
-			"SHA-512", "MGF1", MGF1ParameterSpec.SHA512, 512 / 8, 1))
+		val pssSpec = new PSSParameterSpec(
+			"SHA-512", "MGF1", MGF1ParameterSpec.SHA512, 512 / 8, 1)
+		println("PSSParameterSpec="+pssSpec)
+		rsapss.setParameter(pssSpec)
+		println("RSASSA-PSS with params="+rsapss.toString)
 		rsapss
 
 	//todo: remove dependence on JW2JCA
-	lazy val sha512rsaSig: JSignature = JW2JCA.getSignerAndVerifier("SHA512withRSA").get
+	def sha512rsaSig: JSignature = JW2JCA.getSignerAndVerifier("SHA512withRSA").get
 
-	lazy val `test-key-rsa-pss-sigdata`: SigningData = SigningData(testKeyPSSpriv, `rsa-pss-sha512`)
-	lazy val `test-key-rsa-sigdata`: SigningData = SigningData(testKeyRSAPriv, sha512rsaSig)
+	/** Sigdata should always be new too in multithreaded environements, as it uses stateful signatures. */
+	def `test-key-rsa-pss-sigdata`: SigningData = SigningData(testKeyPSSpriv, `rsa-pss-sha512`)
+	def `test-key-rsa-sigdata`: SigningData = SigningData(testKeyRSAPriv, sha512rsaSig)
 
 	/**
 	 * emulate fetching the signature verification info for the keyids given in the Spec
 	 * */
-	def fetchSig(keyid: Rfc8941.SfString): Future[SigVerification[Keyid]] =
+	def keyidFetcher(keyid: Rfc8941.SfString): Future[SigVerification[Keyid]] =
 		keyid.asciiStr match
 			case "test-key-rsa-pss" =>
 				FastFuture.successful(RFCSigVerificationData(testKeyPSSpub, `rsa-pss-sha512`)(keyid))
@@ -533,7 +542,7 @@ object TestMessageSigningRFCFn {
 
 	/** we are using [[https://github.com/solid/authentication-panel/blob/main/proposals/HttpSignature.md HttpSig]]
 	 * extension to verify Signing HTTP Messages */
-	def cred(signame: String) = GenericHttpCredentials("HttpSig", Map("name" -> signame))
+	def cred(signame: String) = GenericHttpCredentials("HttpSig", Map("proof" -> signame))
 
 
 }
