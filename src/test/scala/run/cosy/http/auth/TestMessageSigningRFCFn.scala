@@ -238,7 +238,7 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 
 		val sigBytes = Base64.getDecoder.decode(proxySig)
 
-		val javaSig = sha512rsaSig
+		val javaSig = sha256rsaSig()
 		javaSig.initVerify(testKeyRSApub)
 		javaSig.update(sigInputStr.getBytes(StandardCharsets.US_ASCII))
 		assert(javaSig.verify(sigBytes.toArray))
@@ -328,7 +328,7 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 		println(signature)
 		val sigBytes = Base64.getDecoder.decode(signature)
 
-		val javaSig = `rsa-pss-sha512`
+		val javaSig = `rsa-pss-sha512`()
 		javaSig.initVerify(testKeyPSSpub)
 		javaSig.update(sigInputStr.getBytes(StandardCharsets.US_ASCII))
 		assert(javaSig.verify(sigBytes.toArray))
@@ -558,7 +558,7 @@ object TestMessageSigningRFCFn {
 		.generatePrivate(new PKCS8EncodedKeySpec(testKeyPSSPrivStr.base64Decode.unsafeArray))
 
 	/** one always has to create a new signature on each verification if in multi-threaded environement */
-	def `rsa-pss-sha512`: JSignature =
+	def `rsa-pss-sha512`(): JSignature =
 //	   also tried see [[https://tools.ietf.org/html/rfc7518 JSON Web Algorithms (JWA) RFC]]
 //		com.nimbusds.jose.crypto.impl.RSASSA.getSignerAndVerifier(JWSAlgorithm.PS512, new BouncyCastleProvider() )
 		val rsapss = JSignature.getInstance("RSASSA-PSS")
@@ -570,11 +570,11 @@ object TestMessageSigningRFCFn {
 		rsapss
 
 	//todo: remove dependence on JW2JCA
-	def sha512rsaSig: JSignature = JW2JCA.getSignerAndVerifier("SHA256withRSA").get
+	def sha256rsaSig(): JSignature = JW2JCA.getSignerAndVerifier("SHA256withRSA").get
 
 	/** Sigdata should always be new too in multithreaded environements, as it uses stateful signatures. */
-	def `test-key-rsa-pss-sigdata`: SigningData = SigningData(testKeyPSSpriv, `rsa-pss-sha512`)
-	def `test-key-rsa-sigdata`: SigningData = SigningData(testKeyRSAPriv, sha512rsaSig)
+	def `test-key-rsa-pss-sigdata`: SigningData = SigningData(testKeyPSSpriv, `rsa-pss-sha512`())
+	def `test-key-rsa-sigdata`: SigningData = SigningData(testKeyRSAPriv, sha256rsaSig())
 
 	/**
 	 * emulate fetching the signature verification info for the keyids given in the Spec
@@ -582,9 +582,9 @@ object TestMessageSigningRFCFn {
 	def keyidFetcher(keyid: Rfc8941.SfString): Future[SigVerification[Keyid]] =
 		keyid.asciiStr match
 			case "test-key-rsa-pss" =>
-				FastFuture.successful(RFCSigVerificationData(testKeyPSSpub, `rsa-pss-sha512`)(keyid))
+				FastFuture.successful(RFCSigVerificationData(testKeyPSSpub, `rsa-pss-sha512`())(keyid))
 			case "test-key-rsa" =>
-				FastFuture.successful(RFCSigVerificationData(testKeyRSApub, sha512rsaSig)(keyid))
+				FastFuture.successful(RFCSigVerificationData(testKeyRSApub, sha256rsaSig())(keyid))
 			case x => FastFuture.failed(new Throwable(s"can't get info on sig $x"))
 
 	/** we are using [[https://github.com/solid/authentication-panel/blob/main/proposals/HttpSignature.md HttpSig]]
