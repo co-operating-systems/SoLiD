@@ -20,8 +20,7 @@ import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
 import org.w3.banana.PointedGraph
 import run.cosy.http.{IResponse, RDFMediaTypes, RdfParser}
-import run.cosy.http.auth.{Agent, Anonymous, WebServerAgent}
-import run.cosy.http.auth.SigVerificationData
+import run.cosy.http.auth.{Agent, Anonymous, SignatureVerifier, KeyIdAgent, WebServerAgent}
 import run.cosy.ldp.ResourceRegistry
 import run.cosy.ldp.fs.{BasicContainer => BC}
 import scalaz.NonEmptyList
@@ -148,15 +147,16 @@ class Solid(
 )(using sys: ActorSystem[_]) {
 
 	import akka.actor.typed.scaladsl.AskPattern.{Askable, schedulerFromActorSystem}
-	import run.cosy.http.auth.HttpSig
+	import run.cosy.http.auth.HttpSigDirective
 	import akka.pattern.ask
+	import run.cosy.http.headers.akka.given
 
 	import scala.concurrent.duration.*
 	import scala.jdk.CollectionConverters.*
 	given timeout: Scheduler = sys.scheduler
 	given scheduler: Timeout = Timeout(5.second)
 
-	def fetchKeyId(keyIdUrl: Uri)(reqc: RequestContext): Future[SigVerificationData] = {
+	def fetchKeyId(keyIdUrl: Uri)(reqc: RequestContext): Future[SignatureVerifier[KeyIdAgent]] = {
 		import RouteResult.{Complete,Rejected}
 		import run.cosy.RDF.{given,_}, run.cosy.RDF.ops.{given,*}
 		given ec: ExecutionContext = reqc.executionContext
@@ -178,7 +178,7 @@ class Solid(
 	}
 
 	lazy val securedRoute: Route = extractRequestContext { (reqc: RequestContext) =>
-		HttpSig.httpSignature(reqc)(fetchKeyId(_)(reqc)).optional.tapply {
+		HttpSigDirective.httpSignature(reqc)(fetchKeyId(_)(reqc)).optional.tapply {
 			case Tuple1(Some(agent)) => routeLdp(agent)
 			case Tuple1(None) => routeLdp()	
 		}

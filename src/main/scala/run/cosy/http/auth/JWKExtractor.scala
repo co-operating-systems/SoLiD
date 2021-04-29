@@ -62,7 +62,6 @@ object JWkey {
 		)
 		
 	def fromJwK(jwkStr: String): Try[JWK] = {
-		import org.tomitribe.auth.signatures.Algorithm
 		scala.util.Try(jwk.JWK.parse(jwkStr))
 	}
 	

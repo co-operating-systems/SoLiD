@@ -27,7 +27,7 @@ import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success, Try, Using}
 import akka.event.slf4j.Slf4jLogger
 import run.cosy.http.RDFMediaTypes
-import run.cosy.http.auth.{Agent, WebKeyidAgent, WebServerAgent}
+import run.cosy.http.auth.{Agent, WebServerAgent, KeyIdAgent}
 import run.cosy.ldp.fs.BasicContainer
 import run.cosy.ldp.fs.BasicContainer.{Cmd, Route, WannaDo}
 import run.cosy.ldp.ResourceRegistry
@@ -379,7 +379,7 @@ class BasicContainer private(
 
 		def Authorize(wd: WannaDo): Behavior[Cmd] =
 			context.log.info(s"in Authorize for $dirPath. received $wd")
-			if List(WebServerAgent,WebKeyidAgent(Uri("/user/key#"))).exists(_ == wd.from) then
+			if List(WebServerAgent,KeyIdAgent("/user/key#")).exists(_ == wd.from) then
 				import wd.{given,*}
 				context.context.self ! Do(from,req,replyTo)
 			else wd.replyTo ! HttpResponse(StatusCodes.Unauthorized,

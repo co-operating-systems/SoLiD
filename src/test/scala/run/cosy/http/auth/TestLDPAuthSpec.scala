@@ -87,7 +87,6 @@ class TestSolidLDPAuthSpec extends AnyWordSpec with Matchers with ScalatestRoute
 			}
 	end SolidTestPost
 
-	import org.tomitribe.auth.signatures.PEM
 	val jwk = JWK.parseFromPEMEncodedObjects(TestHttpSigRSAFn.publicKeyPem)
 
 

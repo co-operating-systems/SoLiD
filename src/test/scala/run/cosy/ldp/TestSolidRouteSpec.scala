@@ -17,7 +17,7 @@ import run.cosy.ldp.fs.BasicContainer
 
 import java.nio.file.{Files, Path}
 import concurrent.duration.DurationInt
-import run.cosy.http.auth.HttpSig
+import run.cosy.http.auth.HttpSigDirective
 import run.cosy.http.auth.{WebServerAgent,Agent,Anonymous}
 import run.cosy.ldp.testUtils.TmpDir.{createDir, deleteDir}
 

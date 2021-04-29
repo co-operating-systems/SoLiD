@@ -16,13 +16,14 @@ import akka.http.scaladsl.model.Uri
  */
 object JW2JCA {
 	val signerFactory = new DefaultJWSSignerFactory()
+	import run.cosy.http.auth.SignatureVerifier
 
-	def jw2rca(jwk: JWK, keyId: Uri): Try[SigVerificationData] = {
+	def jw2rca(jwk: JWK, keyId: Uri): Try[SignatureVerifier[KeyIdAgent]] = {
 		jwk.getAlgorithm match {
 		case jwsAlgo: JWSAlgorithm =>
 			Try(RSASSA.getSignerAndVerifier(jwsAlgo,signerFactory.getJCAContext.getProvider)).flatMap{sig=>
 				jwk match
-				case k: AsymmetricJWK => Try(SigVerificationData(k.toPublicKey, sig)(keyId))
+				case k: AsymmetricJWK => Try(SignatureVerifier(keyId,k.toPublicKey, sig))
 				case _ => Failure(CryptoException("we only use assymetric keys!"))
 			}
 		case alg => Failure(CryptoException("We do not support algorithm "+alg))

@@ -4,13 +4,12 @@ import akka.http.scaladsl.model.headers.CacheDirectives._
 import akka.http.scaladsl.model.{DateTime, HttpMessage, HttpRequest, MediaRanges, Uri}
 import akka.http.scaladsl.model.headers._
 import run.cosy.http.auth.MessageSignature._
-import run.cosy.http.auth.TestHttpSigRSAFn.{privateKeyPem, publicKeyPem}
 import run.cosy.http.headers.Rfc8941
-import run.cosy.http.headers.SigInput
+import run.cosy.http.headers.{SigInput,HttpSig}
 import Rfc8941.{IList, SfInt, Token}
 import Rfc8941.Serialise
 import Rfc8941.SyntaxHelper._
-import run.cosy.http.auth.WebKeyidAgent
+import run.cosy.http.auth.KeyIdAgent
 
 import scala.language.implicitConversions
 import run.cosy.ldp.testUtils.StringUtils._
@@ -87,8 +86,8 @@ class TestMessageSignatureFn extends munit.FunSuite {
 
 	def withSigInputTest(testName: String,
 		msg: HttpMessage, sigName: String,
-		sigIn: SigInput, sigData: SigningData, sigVerif: Uri => SigVerificationData,
-		expectedKeyId: Rfc8941.SfString
+		sigIn: SigInput, sigData: SigningData, sigVerif: Uri => SignatureVerifier[KeyIdAgent],
+		expectedKeyAgent: KeyIdAgent
 	)(using munit.Location): Unit = {
 		test(testName) {
 			val newReq: HttpMessage = msg.withSigInput(Rfc8941.Token(sigName),sigIn)
@@ -108,46 +107,46 @@ class TestMessageSignatureFn extends munit.FunSuite {
 			given clock: Clock = Clock.fixed(java.time.Instant.ofEpochSecond(1402170700), java.time.ZoneOffset.UTC)
 
 			//we create the credential object to test the signature
-			val cred = GenericHttpCredentials("HttpSig", Map("proof"->sigName))
+			val cred = HttpSig(Rfc8941.Token(sigName))
 
 			//note: we don't need to add `cred` to the message in an Authorization header. We can just use it
 			//  to test our function.
-			val fres = newReq.signatureAuthN[WebKeyidAgent](fetchKeyId)(cred)
+			val fres: Future[KeyIdAgent] = newReq.signatureAuthN[KeyIdAgent](fetchKeyId)(cred)
 			import scala.concurrent.duration.given
 			scala.concurrent.Await.ready(fres,2.seconds)
 			assertEquals(
 				fres.value,
-				Some(Success(run.cosy.http.auth.WebKeyidAgent(expectedKeyId).get))
+				Some(Success(expectedKeyAgent))
 			)
 		}
 	}
 
-	val sigVerif = SigVerificationData(publicKey,sha512rsaSig)
+	val expectedAgent = KeyIdAgent(Uri("/keys/key#k1"),publicKey)
+	def sigVerif(keyid: Uri) = SignatureVerifier(keyid,publicKey,sha512rsaSig)
 	val sigdata= SigningData(privateKey,sha512rsaSig)
-	val expectedKeyId = Rfc8941.SfString("/keys/key#k1")
 
 	withSigInputTest("req1 enhanced with empty SigInput",
-		req1,"sig1",sigIn1,sigdata,sigVerif, expectedKeyId
+		req1,"sig1",sigIn1,sigdata,sigVerif, expectedAgent
 	)
 
 	withSigInputTest("req1 enhanced with (date) SigInput",
-		req1,"sig1",sigIn2,sigdata,sigVerif,expectedKeyId
+		req1,"sig1",sigIn2,sigdata,sigVerif,expectedAgent
 	)
 
 	withSigInputTest("req1 enhanced with (date etag cache-control) SigInput",
-		req1,"sig1",sigIn3,sigdata,sigVerif,expectedKeyId
+		req1,"sig1",sigIn3,sigdata,sigVerif,expectedAgent
 	)
 
 	withSigInputTest("req1 enhanced with (date etag cache-control) SigInput",
-		req1,"sig1",sigIn4,sigdata,sigVerif,expectedKeyId
+		req1,"sig1",sigIn4,sigdata,sigVerif,expectedAgent
 	)
 
 	withSigInputTest("req1 enhanced with (@request-target etag cache-control) SigInput",
-		req1,"sig1",sigIn5,sigdata,sigVerif,expectedKeyId
+		req1,"sig1",sigIn5,sigdata,sigVerif,expectedAgent
 	)
 
 	withSigInputTest("req2 enhanced with (@request-target etag cache-control) SigInput",
-		req2,"sig1",sigIn5,sigdata,sigVerif,expectedKeyId
+		req2,"sig1",sigIn5,sigdata,sigVerif,expectedAgent
 	)
 
 }

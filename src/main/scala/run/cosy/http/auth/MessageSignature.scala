@@ -4,7 +4,8 @@ import akka.http.javadsl.model.headers.Host
 import akka.http.scaladsl.model.headers.{Authorization, CustomHeader, Date, ETag, GenericHttpCredentials, HttpChallenge, HttpCredentials, RawHeader, `Cache-Control`, `WWW-Authenticate`}
 import akka.http.scaladsl.model.{HttpHeader, HttpMessage, HttpRequest, HttpResponse, Uri}
 import com.nimbusds.jose.util.Base64
-import run.cosy.http.headers.{Rfc8941, SigInput, Signature, Signatures, `Signature-Input`,SelectorOps,`@signature-params`}
+import run.cosy.http.headers.{Rfc8941, HttpSig, SigInput, Signature, Signatures, `Signature-Input`,SelectorOps,
+	`@signature-params`}
 import run.cosy.http.{BetterCustomHeader, BetterCustomHeaderCompanion, InvalidSigException, UnableToCreateSigHeaderException}
 import run.cosy.http.headers.Rfc8941._
 import akka.http.scaladsl.server.Directives.AuthenticationResult
@@ -110,35 +111,29 @@ object MessageSignature {
 			}
 
 		/**
-		 * lift a function to fetch the keyId, into a partial function which given an HttpCredential
-		 * will return an Authentication result.
-		 * The HttpCredential is in the request, but this is useful for interacting with Akka's directives
-		 * todo: see if one can narrow the domain GenericHttpCrendtials to exactly HttpSig credentials
-		 *    so that we have a total function again
+		 * lift a function to fetch the keyId, signature verification data
+		 * into a function which given the HttpSig parameters
+		 * may return an Authenticated Agent
 		 **/
 		def signatureAuthN[Kid <: Keyid](
-			fetchKeyId: Rfc8941.SfString => Future[SigVerification[Kid]]
+			fetchKeyId: Rfc8941.SfString => Future[SignatureVerifier[Kid]]
 		)(using
 			ec: ExecutionContext, clock: Clock, so : SelectorOps[HttpMessage]
-		): PartialFunction[GenericHttpCredentials,Future[Kid]] =
-			case GenericHttpCredentials("HttpSig", _, params) =>
-				val tr = for {
-					name <- params.get("proof")
-							.toRight(InvalidSigException("HttpSig auth needs 'proof' parameter with value the sig name")).toTry
-					tkName <- Try(Rfc8941.Token(name)) //todo: tighter input function should move this test out of here
-					(si: SigInput, sig: Bytes) <- msg.getSignature(tkName)
-							.toRight(InvalidSigException(
-								s"could not find Signature-Input and Signature for Sig name '$name' ")
-							).toTry
-					if si.isValidAt(clock.instant)
-					sigStr <- msg.signingString(si)
-				} yield (si, sigStr, sig)
-				// now we have all the data
-				for {
-					(si: SigInput, sigStr: String, sig: Bytes) <- FastFuture(tr)
-					sigVer <- fetchKeyId(si.keyid)
-					agent <- FastFuture(sigVer.verifySignature(sigStr)(sig))
-				} yield agent
+		): HttpSig => Future[Kid] = (httpSig) =>
+			val tr = for {
+				(si: SigInput, sig: Bytes) <- msg.getSignature(httpSig.proofName)
+						.toRight(InvalidSigException(
+							s"could not find Signature-Input and Signature for Sig name '${httpSig.proofName}' ")
+						).toTry
+				if si.isValidAt(clock.instant)
+				sigStr <- msg.signingString(si)
+			} yield (si, sigStr, sig)
+			// now we have all the data
+			for {
+				(si: SigInput, sigStr: String, sig: Bytes) <- FastFuture(tr)
+				sigVer <- fetchKeyId(si.keyid)
+				agent <- FastFuture(sigVer.verifySignature(sigStr,sig))
+			} yield agent
 	}
 
 }

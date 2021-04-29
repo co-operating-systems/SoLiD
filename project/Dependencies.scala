@@ -29,7 +29,7 @@ object Dependencies {
 	//
 
 	object Scala213Libs {
-		import Dependencies.{Versions=>V}
+		import Dependencies.{Versions => V}
 		/**
 		 * Akka Http Core
 		 * Apache 2 License
@@ -105,7 +105,7 @@ object Dependencies {
 	// Scala 3 libs
 	//
 	object Scala3Libs {
-		import Dependencies.{Versions=>V}
+		import Dependencies.{Versions => V}
 		/**
 		 * [[https://www.scalatest.org/install home page]] published under Apache 2 License
 		 *
@@ -128,14 +128,7 @@ object Dependencies {
 	// Java Libs
 	//
 	object JavaLibs {
-		import Dependencies.{Versions=>V}
-		/**
-		 * Apache 2 License
-		 * Tomitribe HTTP Signatures implementation in Java
-		 *
-		 * @see https://github.com/tomitribe/http-signatures-java
-		 */
-		val tomitribeHttpSig = "org.tomitribe" % "tomitribe-http-signatures" % V.tomitribeHttpSig
+		import Dependencies.{Versions => V}
 
 		/**
 		 * Apache 2 License
@@ -182,7 +175,7 @@ object Dependencies {
 		 */
 		val apacheCommonsCodec = "commons-codec" % "commons-codec" % V.apacheCommonsCodec
 
-		val all = Seq(tomitribeHttpSig, titaniumJSonLD, nimbusDS, logback, apacheCommonsCodec) ++ bouncy
+		val all = Seq(titaniumJSonLD, nimbusDS, logback, apacheCommonsCodec) ++ bouncy
 	}
 
 }
