@@ -3,9 +3,9 @@ package run.cosy.ldp.fs
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, Behavior, PostStop, PreRestart}
 import akka.http.scaladsl.model
-import akka.http.scaladsl.model.StatusCodes.{Created, Gone, InternalServerError, MovedPermanently, NotFound, NotImplemented, OK, PermanentRedirect}
-import akka.http.scaladsl.model.headers.{HttpChallenge, Link, LinkParam, LinkValue, `Content-Type`, `WWW-Authenticate`}
-import akka.http.scaladsl.model.{HttpRequest, HttpResponse, StatusCodes, Uri}
+import akka.http.scaladsl.model.StatusCodes.{Conflict, Created, Gone, InternalServerError, MovedPermanently, NoContent, NotFound, NotImplemented, OK, PermanentRedirect, UnsupportedMediaType}
+import akka.http.scaladsl.model.headers.{`Content-Type`, `WWW-Authenticate`, Accept, Allow, HttpChallenge, Link, LinkParam, LinkParams, LinkValue, RawHeader, ResponseHeader}
+import akka.http.scaladsl.model.{HttpMethods, HttpRequest, HttpResponse, StatusCodes, Uri}
 import akka.http.scaladsl.server.ContentNegotiator.Alternative
 import akka.http.scaladsl.server.ContentNegotiator.Alternative.ContentType
 import akka.http.scaladsl.server.{RequestContext, RouteResult}
@@ -19,22 +19,24 @@ import run.cosy.ldp
 import java.io.{BufferedReader, BufferedWriter, FileReader, FileWriter}
 import java.lang.UnsupportedOperationException
 import java.nio.file.attribute.UserDefinedFileAttributeView
-import java.nio.file.{FileAlreadyExistsException, FileSystem}
+import java.nio.file.{FileAlreadyExistsException, Files, FileSystem, FileVisitOption, Path}
 import java.time.format.DateTimeFormatter
 import java.time.{LocalDate, LocalDateTime, ZoneId, ZoneOffset}
-import java.util.{Locale, stream}
+import java.util.{stream, Locale}
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success, Try, Using}
 import akka.event.slf4j.Slf4jLogger
 import run.cosy.http.RDFMediaTypes
-import run.cosy.http.auth.{Agent, WebServerAgent, KeyIdAgent}
+import akka.http.scaladsl.model.HttpMethods._
+import run.cosy.http.auth.{Agent, Anonymous, KeyIdAgent, WebServerAgent}
+import run.cosy.http.RDFMediaTypes.`text/turtle`
 import run.cosy.ldp.fs.BasicContainer
-import run.cosy.ldp.fs.BasicContainer.{Cmd, Route, WannaDo}
+import run.cosy.ldp.fs.BasicContainer.{`Accept-Post`, rdfContentTypes, AllowHeader, LinkHeaders}
+import run.cosy.ldp.Messages.{Act, Do}
 import run.cosy.ldp.ResourceRegistry
 import scalaz.NonEmptyList.nel
 import scalaz.{ICons, INil, NonEmptyList}
 
-import java.nio.file.{Files, Path}
 import scala.collection.immutable.HashMap
 import scala.util.Random
 
@@ -90,6 +92,14 @@ object BasicContainer {
 	import java.util.{Spliterator, Spliterators}
 	import java.util.stream.{Stream, StreamSupport}
 
+	import org.w3.banana._
+	import _root_.run.cosy.RDF.{given, _}
+	import _root_.run.cosy.RDF.ops.{given,_}
+	val ldp = LDPPrefix[Rdf]
+
+	val ldpBC = ldp.BasicContainer.toAkka
+	val ldpr = ldp.Resource.toAkka
+	
 	/** A collection of "unwise" characters according to [[https://tools.ietf.org/html/rfc2396#section-2.4.3 RFC 2396]]. */
 	val UnwiseChars = """{}|\^[]`"""
 
@@ -116,7 +126,7 @@ object BasicContainer {
 
 	//todo: add Content-Encoding, Content-Language
 	def linkToName(linkName: String, cts: ContentType) =
-		linkName +"."+cts.contentType.mediaType.fileExtensions.headOption.getOrElse("bin")
+		linkName +".0."+cts.contentType.mediaType.fileExtensions.headOption.getOrElse("bin")
 
 	/** @return (linkName, linkTo) strings */
 	def createLinkNames(req: HttpRequest)(using clock: Clock): (String, String) = {
@@ -146,25 +156,40 @@ object BasicContainer {
 //		//todo: factory throws an Exception, where is that caught?
 //		StreamConverters.fromJavaStream(factory)
 //	end ls
+	import akka.http.scaladsl.model.headers.LinkParams.rel
+	import akka.http.scaladsl.model.MediaRanges.`*/*`
+	import RDFMediaTypes.`text/turtle`
 
-	val ldpc = Uri("http://www.w3.org/ns/ldp#BasicContainer")
-	val ldpr = Uri("http://www.w3.org/ns/ldp#Resource")
 	//get all the  URIs with link rel="type"
 	def filterLDPTypeLinks(links: Seq[Link]): Seq[Uri] =
-		import akka.http.scaladsl.model.headers.LinkParams.rel
 		links.flatMap{ link =>
 			link.values.collect {
 				case LinkValue(uri, params) if params.collectFirst({case rel("type") => true}).isDefined => uri
 			}
 		}
 
-	val Ok(ldpcLinkHeaders,_) = HttpHeader.parse(
-		"Link",
-		"""<http://www.w3.org/ns/ldp#BasicContainer>; rel="type",
-		  |<http://www.w3.org/ns/ldp#Resource>; rel="type"""".stripMargin.replace("\n", "")
+	val LinkHeaders = Link(
+		LinkValue(ldp.BasicContainer.toAkka, LinkParams.rel("type")),
+		LinkValue(ldp.Resource.toAkka, LinkParams.rel("type"))
 	)
+	val AllowHeader =
+		import HttpMethods._
+		Allow(GET,POST,DELETE,HEAD,OPTIONS)
 
+	val `Accept-Post` =
+		RawHeader("Accept-Post",`text/turtle`.value + ", " + `*/*`.value)
+
+	val rdfContentTypes = Seq(`text/turtle`)
 	// log.info(s"created LDPC($ldpcUri,$root)")
+
+	val ttlPrefix: Source[String,NotUsed] = Source(
+		List("@prefix stat: <http://www.w3.org/ns/posix/stat#> .\n",
+			"@prefix ldp: <http://www.w3.org/ns/ldp#> .\n\n",
+			"<> a ldp:BasicContainer.\n\n"))
+
+	import run.cosy.ldp.Messages._
+
+	type AcceptMsg = Cmd|PostCreation
 
 	def apply(
 		containerUrl: Uri,
@@ -172,65 +197,25 @@ object BasicContainer {
 	)(
 		using
 		reg: ResourceRegistry
-	): Behavior[Cmd] = Behaviors.setup[Cmd] { (context: ActorContext[Cmd]) =>
+	): Behavior[AcceptMsg] = Behaviors.setup[AcceptMsg] { (context: ActorContext[AcceptMsg]) =>
 		//val exists = Files.exists(root)
 		reg.addActorRef(containerUrl.path, context.self)
 		context.log.info(s"started actor for <${containerUrl}> in dir <file:/${dir.toAbsolutePath}>")
 		new BasicContainer(containerUrl, dir, new Spawner(context)).behavior
 	}
 
-	sealed trait Cmd
-
-	//trait for a Cmd that is to be acted upon
-	sealed trait Act extends Cmd
-	sealed trait Route extends Cmd
-	sealed trait Info extends Cmd
-
-	sealed trait ReqMsg {
-		val req: HttpRequest
-		val from: Agent
-		val replyTo: ActorRef[HttpResponse]
-	}
-
 	/**
-	 * @param path the path to the final resource */
-	final case class RouteMsg(
-		path: NonEmptyList[String],
-		from: Agent,
-		req: HttpRequest,
-		replyTo: ActorRef[HttpResponse]
-	)(using val mat: Materializer, val ec: ExecutionContext) extends ReqMsg with Route {
-		def name: String = path.head
-
-		// check that path is not empty before calling  (anti-pattern)
-		def next: ReqMsg with Route = path match
-			case NonEmptyList(_, INil()) => WannaDo(from, req, replyTo)
-			case NonEmptyList(_, ICons(h,tail)) => RouteMsg(nel(h,tail), from, req, replyTo)
-	}
-
-	/** a command to be executed on the resource on which it arrives, after being authorized */
-	final case class Do(
-		from: Agent,
-		req: HttpRequest,
-		replyTo: ActorRef[HttpResponse]
-	)(using val mat: Materializer, val ec: ExecutionContext) extends ReqMsg with Act
-
-	/** message has arrived, but still needs to be authorized */
-	final case class WannaDo(
-		 from: Agent,
-		 req: HttpRequest,
-		 replyTo: ActorRef[HttpResponse]
-	)(using val mat: Materializer, val ec: ExecutionContext) extends ReqMsg with Route
-
-	/** Message for initial creation of container, after creation of dir. HttpRequest in Do.  */
-	case class CreateContainer(
+	 * The resource with `name` has been created, but the request `cmd` must still be completed.
+	 * E.g. the data from the body of `cmd` must still be saved into the new resource.
+	 * (could one forward the old request? That would just mean downstream would need to be very
+	 *  careful to compare the object of `Do`  to notice that the request was no longer aimed there,
+	 *  and so interpret the content different... A little easy to make mistakes)
+	 **/
+	case class PostCreation(
 		name: Path, cmd: Do
 	)(using
-	  val mat: Materializer, val ec: ExecutionContext
-	) extends Act
-
-	// responses from child to parent
-	case class ChildTerminated(name: String) extends Info
+		val mat: Materializer, val ec: ExecutionContext
+	)
 
 }
 
@@ -291,18 +276,15 @@ class BasicContainer private(
 	containerUrl: Uri,
 	dirPath: Path,
 	context: Spawner
-)(
-	using
+)( using
 	reg: ResourceRegistry
 ) {
-
-	import BasicContainer.{Do, ReqMsg, RouteMsg, linkToName, santiseSlug}
 	import akka.http.scaladsl.model.HttpCharsets.`UTF-8`
 	import akka.http.scaladsl.model.MediaTypes.{`text/plain`, `text/x-java-source`}
 	import akka.http.scaladsl.model.headers.{Link, LinkParams, LinkValue, Location, `Content-Type`}
 	import akka.http.scaladsl.model.{ContentTypes, HttpCharsets, HttpEntity, HttpMethods}
-	import HttpMethods.{GET, POST, DELETE}
-	import Resource.CreateResource
+	import BasicContainer._
+	import run.cosy.ldp.Messages._
 	import run.cosy.ldp.fs.{Ref,CRef,RRef}
 	import run.cosy.ldp.fs.Attributes.{Attributes, Archived, OtherAtt, ActorFileAttr, Other}
 
@@ -320,13 +302,11 @@ class BasicContainer private(
 	//					Behaviors.stopped
 	//			}
 
-	def behavior: Behavior[Cmd] = {
+	def behavior: Behavior[AcceptMsg] = {
 		val isDir = Files.isDirectory(dirPath)
 		if (isDir) new Dir().start
 		else ??? //if PUT create dir else return error
 	}
-
-
 
 	// url for resource with `name` in this container
 	def urlFor(name: String): Uri = containerUrl.withPath(containerUrl.path / name)
@@ -339,12 +319,20 @@ class BasicContainer private(
 	 * what it links to! So we should perhaps instead use a plain file for deleted resources!
 	 * */
 	val dirList: Source[(Path, BasicFileAttributes), NotUsed] = Source.fromGraph(
-		DirectoryList(dirPath,1){ (path: Path, att: BasicFileAttributes) =>
-			att.isSymbolicLink || (att.isDirectory && !path.getFileName.toString.contains('.'))
-		})
-	val prefix: Source[String,NotUsed] = Source(
-		List("@prefix stat: <http://www.w3.org/ns/posix/stat#> .\n",
-		"@prefix ldp: <http://www.w3.org/ns/ldp#> .\n\n"))
+			DirectoryList(dirPath,1,FileVisitOption.FOLLOW_LINKS){ isLDPPath }
+		)
+
+	def dirIsEmpty:Boolean =
+		import scala.jdk.FunctionConverters.given
+		Files.find(dirPath,1,isLDPPath.asJava).findAny().isEmpty
+
+	/**
+	 * contained resources have no `.` in them, and don't point to symbolic links.
+	 * We assume here that we have `FileVisitOption.FOLLOW_LINKS` set, as we want to
+	 * know the size and dates of the resulting files, not of the link.
+	 * */
+	private def isLDPPath(path: Path, withAtt: BasicFileAttributes): Boolean =
+		!(path == dirPath || withAtt.isSymbolicLink || path.getFileName.toString.contains('.'))
 
 	def containsAsTurtle(path: Path, att: BasicFileAttributes): String = {
 		val filename = path.getFileName.toString + { if att.isDirectory then "/" else "" }
@@ -355,7 +343,7 @@ class BasicContainer private(
 			|""".stripMargin
 	}
 
-	//	def notContainerBehavior(exists: Boolean): Behaviors.Receive[Cmd] =
+//	def notContainerBehavior(exists: Boolean): Behaviors.Receive[Cmd] =
 //		val exists = Files.exists(dirPath)
 //		Behaviors.receiveMessage[Cmd] { msg =>
 //			msg match
@@ -370,17 +358,17 @@ class BasicContainer private(
 	//to avoid requests to the FS
 	class Dir(contains: Contents = HashMap(), counters: Counter = HashMap()) {
 
-
 		import akka.stream.alpakka.file.scaladsl.Directory
 
 		import java.nio.file.attribute.BasicFileAttributes
 		import java.time.Instant
 		import scala.annotation.tailrec
 
-		def Authorize(wd: WannaDo): Behavior[Cmd] =
+		def Authorize(wd: WannaDo): Behavior[AcceptMsg] =
 			context.log.info(s"in Authorize for $dirPath. received $wd")
-			if List(WebServerAgent,KeyIdAgent("/user/key#")).exists(_ == wd.from) then
-				import wd.{given,*}
+			if true || List(WebServerAgent,KeyIdAgent("/user/key#")).exists(_ == wd.from) then
+				import wd.{given,_}
+				//todo: authorization will result in a Future, so one will then use context.pipeToSelf
 				context.context.self ! Do(from,req,replyTo)
 			else wd.replyTo ! HttpResponse(StatusCodes.Unauthorized,
 				Seq(`WWW-Authenticate`(HttpChallenge("Signature",s"$dirPath")))
@@ -388,19 +376,28 @@ class BasicContainer private(
 			Behaviors.same
 
 
-		lazy val start: Behavior[Cmd] = {
-			Behaviors.receiveMessage[Cmd] { (msg: Cmd) =>
-				import BasicContainer.{ChildTerminated, CreateContainer}
+		/**
+		 * Create ACL file.
+		 * When should this be done? Certainly on creation. But what if there is no ACL on
+		 * actor startup?
+		 * What should be put in the ACL?
+		 **/
+//		def createACL(defaults: Rdf#Graph): Boolean = true
+
+		lazy val start: Behavior[AcceptMsg] = {
+			Behaviors.receiveMessage[AcceptMsg] { (msg: AcceptMsg) =>
+				import BasicContainer.PostCreation
 				msg match
 					case wd: WannaDo => Authorize(wd)
 					case act: Do => run(act)
-					case create: CreateContainer =>
-						// we don't do much at this point. For later
+					case create: PostCreation =>
+						//place to do things on container creation
+						//should ACL rules be set up here, or on startup? What else can be done on creation?
+//						createACL(null)
+						//reply that done
 						create.cmd.replyTo ! HttpResponse(
 							Created,
-							Seq(Location(containerUrl.withPath(containerUrl.path/"")),
-								BasicContainer.ldpcLinkHeaders
-							)
+							Location(containerUrl.withPath(containerUrl.path / ""))::LinkHeaders::AllowHeader::Nil
 						)
 						Behaviors.same
 					case routeMsg: RouteMsg => routeHttpReq(routeMsg)
@@ -508,10 +505,12 @@ class BasicContainer private(
 				case e => context.log.warn(s"Can't save counter value $count for <$countFile>", e)
 			}
 
-
 		protected
-		def run(msg: Do): Behavior[Cmd] =
+		def run(msg: Do): Behavior[AcceptMsg] =
+			context.log.info(s"in run received msg $msg")
 			import akka.stream.alpakka.file.scaladsl.Directory
+			import BasicContainer.ttlPrefix
+			import RDFMediaTypes.`text/turtle`
 			import msg.{ec, mat, req}
 			import req._
 			if (!uri.path.endsWithSlash)
@@ -522,20 +521,32 @@ class BasicContainer private(
 				)
 				Behaviors.same
 			else method match
-				case GET => //return visible contents of directory
-					msg.replyTo ! HttpResponse(
-						OK, Seq(),
-						HttpEntity(RDFMediaTypes.`text/turtle`.toContentType,
-							Source.combine(prefix,dirList.map(containsAsTurtle))(Concat(_)).map(s =>ByteString(s)))
+				case OPTIONS =>
+					msg.replyTo ! HttpResponse ( //todo, add more
+						NoContent, `Accept-Post` :: AllowHeader :: Nil
 					)
+					Behaviors.same
+				case GET | HEAD  => //return visible contents of directory
+					//todo: I don't think this takes account of priorities. Check
+					if req.headers[Accept].exists(_.mediaRanges.exists(_.matches(`text/turtle`))) then
+						msg.replyTo ! HttpResponse (
+							OK, LinkHeaders :: `Accept-Post` :: AllowHeader :: Nil,
+							HttpEntity (`text/turtle`.toContentType,
+							Source.combine (ttlPrefix, dirList.map (containsAsTurtle) ) (Concat (_) ).map (s => ByteString (s) ) )
+						)
+					else
+						msg.replyTo ! HttpResponse(
+							UnsupportedMediaType, LinkHeaders :: `Accept-Post` :: AllowHeader :: Nil,
+							HttpEntity("We only support text/turtle media type at the moment")
+						)
 					Behaviors.same
 				case POST =>  //create resource
 					//todo: create sub container for LDPC Post
 					import java.time.Clock
-					import BasicContainer.{createLinkNames, filterLDPTypeLinks,createNewResourceName,ldpc,ldpr}
+					import BasicContainer.{createLinkNames, filterLDPTypeLinks,createNewResourceName,ldpBC,ldpr}
 					import BasicContainer.{given Clock}
 					val types = filterLDPTypeLinks(headers[Link])
-					if types.contains(ldpc) then
+					if types.contains(ldpBC) then
 						//todo: should one also parse the body first to check that it is well formed? Or should that
 						//   be left to the created actor - which may have to delete itself if not.
 						val newDirName = createNewResourceName(msg.req)
@@ -547,7 +558,7 @@ class BasicContainer private(
 						}
 						response match {
 							case Success((cref, dir)) =>
-								cref.actor ! BasicContainer.CreateContainer(cref.att.path,msg)
+								cref.actor ! PostCreation(cref.att.path,msg)
 								dir.start
 							case Failure(e) =>
 								HttpResponse(InternalServerError, Seq(),
@@ -564,7 +575,7 @@ class BasicContainer private(
 						}
 						response match {
 							case Success((ref, dir)) =>
-								ref.actor ! CreateResource(dirPath.resolve(ref.att.to),msg)
+								ref.actor ! PostCreation(dirPath.resolve(ref.att.to),msg)
 								dir.start
 							case Failure(e) =>
 								HttpResponse(InternalServerError, Seq(),
@@ -573,9 +584,16 @@ class BasicContainer private(
 						}
 					end if
 				case DELETE =>
-					//todo: check that there are no contents in the directory then delete
-					HttpResponse(NotImplemented, Seq(), entity = s"have not implemented  ${msg.req.method} for ${msg.req.uri}")
-					Behaviors.same
+					if dirIsEmpty then
+						Files.move(dirPath,dirPath.resolveSibling(""+dirPath.getFileName() + ".archive"))
+						HttpResponse(NoContent, Seq(), entity = s"resource deleted")
+						Behaviors.stopped
+					else
+						HttpResponse(Conflict, LinkHeaders :: `Accept-Post` :: AllowHeader :: Nil,
+							entity = HttpEntity (`text/turtle`.toContentType,
+								Source.combine(ttlPrefix, dirList.map (containsAsTurtle) )(Concat (_) )
+									.map (s => ByteString (s) ) ))
+						Behaviors.same
 				//todo: create new PUT request and forward to new actor?
 				//or just save the content to the file?
 				case _ =>
@@ -593,7 +611,7 @@ class BasicContainer private(
 //		}
 
 		protected
-		def routeHttpReq(msg: RouteMsg): Behavior[Cmd] = {
+		def routeHttpReq(msg: RouteMsg): Behavior[AcceptMsg] = {
 			context.log.info(
 				s"received ${msg.req.method.value} <${msg.req.uri}> in ${dirPath.toFile.getAbsolutePath} in container with uri $containerUrl")
 
@@ -609,7 +627,7 @@ class BasicContainer private(
 		//  but getRef can also return a RRef... So `cat.jpg`
 		//  here would return a `cat.jpg` RRef rather than `cat` or a `CRef`
 		//  this indicates that the path name must be set after checking the attributes!
-		def forwardToContainer(name: String, msg: ReqMsg with Route): Behavior[Cmd] = {
+		def forwardToContainer(name: String, msg: ReqMsg with Route): Behavior[AcceptMsg] = {
 			if name.contains('.') then
 				msg.replyTo ! HttpResponse(NotFound,
 					entity=HttpEntity("This Solid server serves no resources with a '.' char in path segments (except for the last `file` segment)."))
@@ -644,7 +662,7 @@ class BasicContainer private(
 		 * @return A new Behavior, updated if a new child actor is created.
 		 */
 		protected
-		def forwardMsgToResourceActor(name: String, msg: WannaDo): Behavior[Cmd] =
+		def forwardMsgToResourceActor(name: String, msg: WannaDo): Behavior[AcceptMsg] =
 			val dotLessName = actorNameFor(name)
 			getRef(dotLessName) match
 			case Some(x,dir) =>

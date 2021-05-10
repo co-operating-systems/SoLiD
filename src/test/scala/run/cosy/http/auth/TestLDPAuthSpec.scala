@@ -22,8 +22,6 @@ import concurrent.duration.DurationInt
 import run.cosy.http.auth.WebServerAgent
 import run.cosy.ldp.ResourceRegistry
 import run.cosy.ldp.testUtils.TmpDir.{createDir, deleteDir}
-import run.cosy.RDF.{given,*}
-import run.cosy.RDF.ops.{given,*}
 import run.cosy.http.RDFMediaTypes.*
 import run.cosy.http.RdfParser.{rdfRequest,rdfUnmarshaller}
 import akka.http.scaladsl.unmarshalling.FromEntityUnmarshaller
@@ -33,7 +31,11 @@ class TestSolidLDPAuthSpec extends AnyWordSpec with Matchers with ScalatestRoute
 
 	import akka.http.scaladsl.server.Directives
 	import akka.http.scaladsl.client.{RequestBuilding=>Req}
+	import _root_.run.cosy.RDF.{given,*}
+	import _root_.run.cosy.RDF.ops.{given,*}
 	val security  = SecurityPrefix[Rdf]
+	val foaf = FOAFPrefix[Rdf]
+	val cert = CertPrefix[Rdf]
 
 	val dirPath: Path = createDir("solidTest_")
 
@@ -63,7 +65,7 @@ class TestSolidLDPAuthSpec extends AnyWordSpec with Matchers with ScalatestRoute
 
 	class SolidTestPost(solid: Solid, agent: Agent=new Anonymous):
 
-		def newResource(baseDir: Uri, slug: Slug, ct: ContentType.WithFixedCharset, text: String): Uri =
+		def newResource(baseDir: Uri, slug: Slug, ct: ContentType.NonBinary, text: String): Uri =
 			HttpRequest(HttpMethods.POST, baseDir, Seq[HttpHeader](slug), HttpEntity(ct,text)) ~>
 				solid.routeLdp(agent) ~> check {
 				status shouldEqual StatusCodes.Created
@@ -88,10 +90,9 @@ class TestSolidLDPAuthSpec extends AnyWordSpec with Matchers with ScalatestRoute
 	end SolidTestPost
 
 	val jwk = JWK.parseFromPEMEncodedObjects(TestHttpSigRSAFn.publicKeyPem)
-
-
+	
 	val lit: Rdf#Node = Literal(jwk.toJSONString,rdf.JSON)
-	val keyGraph: Rdf#Graph = {URI("#key") -- security.publicKeyJwk ->- PointedGraph(lit, Graph.empty)}.graph
+	val keyGraph: Rdf#Graph = { URI("#") -- security.publicKeyJwk ->- PointedGraph(lit, Graph.empty)}.graph
 
 	"The Server" when {
 		val rootC =  toUri("/")
@@ -118,13 +119,24 @@ class TestSolidLDPAuthSpec extends AnyWordSpec with Matchers with ScalatestRoute
 			test.readRDF(newUri,canonicalKeyGraph)
 
 			info("GET the same document by authenticating with the key")
+			import org.w3.banana.binder.PGBinder.given
+			info("create a card with a key pointing to the key")
+			val relGraph = {
+				URI("#i") -- foaf.name ->- "Henry Story"
+					-- cert.key ->- PointedGraph[Rdf](URI("/key#"))   //todo: for some reason we need PointedGraph here...
+					-- foaf.workInfoHomepage ->- PointedGraph[Rdf](URI("https://co-operating.systems/"))
+			}
 
-//			info("create 3 more resources with the same Slug and GET them too")
-//			for (count <- (2 to 5).toList) {
-//				val createdUri = test.newResource(rootC, Slug("Hello"), s"Hello World $count!")
-//				assert(createdUri.path.endsWith(s"Hello_$count"))
-//				test.read(createdUri,s"Hello World $count!", 3)
-//			}
+			val createdUri = test.newResource(rootC, Slug("card"), `text/turtle`.toContentType,
+				"""@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+				  |@prefix cert: <http://www.w3.org/ns/auth/cert#> .
+				  |<#i> foaf:name "Henry Story";
+				  |	cert:key </key#>;
+				  |	foaf:workInfoHomepage <https://co-operating.systems/> .
+				  |""".stripMargin)
+			assert(createdUri.path.endsWith("card"))
+			test.readRDF(createdUri,relGraph.graph.resolveAgainst(URI(createdUri.toString())))
+
 //
 //			info("Delete the first created resource </Hello>")
 //			Req.Delete(newUri) ~> solid.routeLdp(WebServerAgent) ~> check {

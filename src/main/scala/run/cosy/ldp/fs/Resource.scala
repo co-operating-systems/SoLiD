@@ -1,68 +1,44 @@
 package run.cosy.ldp.fs
 
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
-import akka.actor.typed.{ActorRef, Behavior, scaladsl}
+import akka.actor.typed.{scaladsl, ActorRef, Behavior}
+import akka.http.scaladsl.common.StrictForm.FileData
 import akka.http.scaladsl.model.MediaTypes.{`text/plain`, `text/x-java-source`}
-import akka.http.scaladsl.model.ContentTypes.`text/plain(UTF-8)`
+import akka.http.scaladsl.model.ContentTypes.{`text/html(UTF-8)`, `text/plain(UTF-8)`}
 import akka.http.scaladsl.model.HttpCharsets.`UTF-8`
 import akka.http.scaladsl.model._
-import akka.http.scaladsl.model.headers.{Accept, HttpChallenge, Location, `Content-Type`, `WWW-Authenticate`}
-import akka.stream.IOResult
+import akka.http.scaladsl.model.headers.{`Content-Type`, `WWW-Authenticate`, Accept, Allow, ETag, HttpChallenge, Link, LinkParams, LinkValue, Location}
+import akka.http.scaladsl.model.StatusCodes.{Conflict, Created, Gone, InternalServerError, MethodNotAllowed, NoContent}
+import akka.http.scaladsl.server.ContentNegotiator.Alternative.ContentType
+import akka.stream.{IOResult, Materializer}
 import akka.stream.scaladsl.FileIO
 import run.cosy.http.FileExtensions
 import run.cosy.http.auth.{KeyIdAgent, WebServerAgent}
 import run.cosy.ldp.ResourceRegistry
-import run.cosy.ldp.fs.BasicContainer.{Cmd, Do, ReqMsg, RouteMsg, WannaDo}
-import run.cosy.ldp.fs.Resource.connegNamesFor
+import run.cosy.ldp.Messages._
+import run.cosy.ldp.fs.Resource.{connegNamesFor, extension, headersFor, StateSaved}
 import run.cosy.http.auth.KeyIdAgent
+import run.cosy.ldp.fs.BasicContainer.{LinkHeaders, PostCreation}
 
-import java.nio.file.{Files, Path => FPath}
+import java.nio.file.{CopyOption, Files, Path => FPath}
+import java.nio.file.attribute.{BasicFileAttributes, FileAttribute}
+import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.security.Principal
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
 //import akka.http.scaladsl.model.headers.{RequestClientCertificate, `Tls-Session-Info`}
 
-/**
- * LDPR Actor extended with Access Control
- * In order to avoid having to list the whole directory to find out if a file exists,
- * we create a resource actor that can make a few cheaper spot checks for files given
- * the request, and so build up a little DB.
- *
- * A Resource can react to
- *  - GET and do content negotiation
- *  - PUT for changes
- *  - PATCH and QUERY potentially
- *
- * Because the Directory does not necessarily look if any of the resources exist, the actor
- * should close down soon after finding that there is nothing there.
- *
- * An LDPR actor should garbage collect after a time, to reduce memory useage
- */
 object Resource {
 
-	import Resource.CreateResource
-	import HttpMethods._
-	import StatusCodes._
 	import akka.stream.Materializer
+	import BasicContainer.ldp
 
 	import java.nio.file.Path
 	import scala.concurrent.ExecutionContext
 
-	//log.info(s"created LDPR($ldprUri,$path)")
-
-	type AcceptMsg = WannaDo | Do | CreateResource
+	type AcceptMsg = WannaDo | Do | PostCreation | StateSaved
 	
-	/** send POST to child actor so that it can place the content body
-	 * into the file `linkTo`
-	 * (arguably one may want to only send the RequestBody, instead of the full Do)
-	 **/
-	case class CreateResource(
-		linkTo: Path, cmd: Do
-	)(using
-	  val mat: Materializer, val ec: ExecutionContext
-	)
-
 	//guard could be a pool?
 	//var guard: ActorRef = _
 
@@ -72,16 +48,34 @@ object Resource {
 //    guard = context.actorOf(Props(new Guard(ldprUri,List())))
 //  }
 
+	case class StateSaved(at: Path, replyTo: ActorRef[HttpResponse])
+
 	def mediaType(path: FPath): MediaType = FileExtensions.forExtension(extension(path))
 
-	def extension(path: FPath) = {
+	import run.cosy.RDF._
+
+	val AllowHeader =
+		import HttpMethods._
+		Allow(GET,PUT,DELETE,HEAD,OPTIONS) //add POST for Solid Resources
+
+	def extension(path: FPath) =
 		val file = path.getFileName.toString
 		var n = file.lastIndexOf('.')
-		if (n > 0) file.substring(n + 1)
-		else ""
-	}
+		if n > 0 then file.substring(n + 1) else ""
 
-	def apply(rUri: Uri, linkName: FPath, linkTo: FPath, name: String): Behavior[AcceptMsg] =
+	def headersFor(att: BasicFileAttributes): List[HttpHeader] =
+		eTag(att)::lastModified(att)::Nil
+
+	def eTag(att: BasicFileAttributes): ETag =
+		import att._
+		//todo: rather than the file key, which contains an inode number, one could just use the version name
+		ETag(s"${lastModifiedTime.toMillis}_${size}_${fileKey.hashCode()}")
+
+	def lastModified(att: BasicFileAttributes): HttpHeader =
+		import akka.http.scaladsl.model.headers.`Last-Modified`
+		`Last-Modified`(DateTime(att.lastModifiedTime().toMillis))
+
+	def apply(rUri: Uri, linkName: FPath, name: String): Behavior[AcceptMsg] =
 		Behaviors.setup[AcceptMsg] { (context: ActorContext[AcceptMsg]) =>
 			//val exists = Files.exists(root)
 //			val registry = ResourceRegistry(context.system)
@@ -94,117 +88,397 @@ object Resource {
 	 * */
 	def connegNamesFor(name: String, ct: `Content-Type`): List[String] =
 		ct.contentType.mediaType.fileExtensions.map(name + "." + _)
+
+	object Version {
+		def unapply(ver: String): Option[Int] = ver.toIntOption
+	}
 }
 
 import run.cosy.ldp.fs.Resource.AcceptMsg
+import run.cosy.ldp.fs.BasicContainer.PostCreation
 
+/**
+ * LDPR Actor extended with Access Control.
+ * The LDPR Actor should keep track of states for a resource, such as previous versions,
+ * and variants (e.g. human translations, or just different formats for the same content).
+ * The LDPR actor deals with creation and update to resources.
+ *
+ * A Resource can react to
+ *  - GET and do content negotiation
+ *  - PUT for changes
+ *  - PATCH and QUERY potentially
+ *
+ * An LDPR actor should garbage collect after inactive time, to reduce memory useage.
+ *
+ * This implementation makes a number of arbitrary decisions.
+ * 1. Resources are symlinks pointing to default representations
+ * 2.
+ */
 class Resource(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg]) {
-	import Resource.{CreateResource, mediaType}
+	import Resource.mediaType
 	import context.log
+	val name = uri.path.reverse.head.toString
 
-	log.info(s"starting Resource for <$uri> on $linkPath")
+	def LDPR = LinkValue(run.cosy.ldp.fs.BasicContainer.ldpr,LinkParams.rel("type"),LinkParams.anchor(uri))
+	def LatestVersion = LinkValue(uri,LinkParams.rel("latest-version"))
 
-	def behavior = {
-		val linkTo = Files.readSymbolicLink(linkPath)
-		if linkTo.endsWith(".archive") then FileData().GoneBehavior
-		else FileData().NormalBehavior
+	def behavior: Behaviors.Receive[AcceptMsg] = {
+		val linkTo = linkPath.resolveSibling(Files.readSymbolicLink(linkPath))
+		if linkTo.getFileName.toString.endsWith(".archive") then GoneBehavior
+		//todo: can we avoid this request to the FSystem?
+		else if !Files.exists(linkTo) then justCreatedBehavior
+		else try {
+			val version = linkTo.getFileName.toString.split('.').toSeq match {
+				case Seq(name,version,extension) => version.toIntOption.getOrElse(0)
+				case Seq(name,extension) => 0
+			}
+			new VersionsInfo(version, linkTo).NormalBehavior
+		} catch {
+			case e: java.nio.file.NoSuchFileException => justCreatedBehavior
+			//case e: java.io.IOException => ???
+				//this would be a rare type of exception where ???
+		}
 	}
 
 	/**
-	 * @param variants cache of variants for the resource - should be a more complex structure
-	 * @param linkToOpt as an Opt because on creation the Linked to file may not yet have been written
+	 * All transformations come in two phases (it seems)
+	 *   1. creating a new name (to save data to)
+	 *   1. filling in the data by transformation from the old resource to the new one.
+	 *      the transformation can be just to copy all the data, or to PATCH the old resource,
+	 *      or DELETE the last one giving a new end of state.
+	 *
+	 *  Here we start seeing the beginning of such generality, but as we don't have PATCH we only
+	 *  see the creation of a new version - either the initial version, or the next version.
+	 *  The above also works with delete, if we think of it as moving everything to an invisible archive
+	 *  directory.
+	 **
+	 * @param cr the PostCreation message (still looking for a better name)
 	 */
-	class FileData(val variants: Set[FPath] = Set(), val linkToOpt: Option[FPath] = None) {
-		import akka.http.scaladsl.model.HttpMethods.{GET, POST, DELETE}
-		import akka.http.scaladsl.model.StatusCodes.{Created, InternalServerError, Gone}
+	def BuildContent(cr: PostCreation): Unit =
+		val PostCreation(linkToPath, Do(_,req,replyTo)) = cr
+		log.info(
+			s"""received POST request with headers ${req.headers} and CT=${req.entity.contentType}
+				|Saving to: $linkToPath""".stripMargin)
+		import cr.given
+		val f: Future[IOResult] = req.entity.dataBytes.runWith(FileIO.toPath(linkToPath))
+		context.pipeToSelf(f){
+			case Success(IOResult(count, _)) => StateSaved(linkToPath, replyTo)
+			case Failure(e) =>
+				log.warn(s"Unable to prcess request $cr. Deleting $linkToPath")
+				// actually one may want to allow the client to continue from where it left off
+				// but until then we delete the broken resource immediately
+				Files.deleteIfExists(linkToPath)
+				StateSaved(null,replyTo)
+		}
 
-		def linkToData: (FPath, FileData) =
-			linkToOpt match
-			case Some(link) => (link, FileData.this)
-			case None =>
-				val to: FPath = Files.readSymbolicLink(linkPath)
-				(to, new FileData(variants,Some(to)))
+	def justCreatedBehavior = 	Behaviors.receiveMessage[AcceptMsg] { (msg: AcceptMsg) =>
+		msg match
+			case cr : PostCreation =>
+				BuildContent(cr)
+				Behaviors.same
+			case StateSaved(null,replyTo) =>
+				//If we can't save the body of a POST then the POST fails
+				// todo: the parent should also be notified... (which it will with stopped below, but enough?)
+				Files.delete(linkPath)
+				// is there a more specific error to be had?
+				replyTo ! HttpResponse(StatusCodes.InternalServerError,
+					entity=HttpEntity("upload unsucessful")
+				)
+				Behaviors.stopped
+			case StateSaved(pos,replyTo) =>
+				//todo: we may only want to check that the symlinks are correct
+				import java.nio.file.StandardCopyOption.ATOMIC_MOVE
+				import Resource._
+				val tmpSymLinkPath = Files.createSymbolicLink(
+					linkPath.resolveSibling(pos.getFileName.toString+".tmp"), pos.getFileName
+				)
+				Files.move(tmpSymLinkPath,linkPath,ATOMIC_MOVE)
+				val att = Files.readAttributes(pos, classOf[BasicFileAttributes])
+				replyTo ! HttpResponse(Created,
+					Location(uri)::Link(LDPR::Nil)::AllowHeader::headersFor(att),
+					HttpEntity(`text/plain(UTF-8)`, s"uploaded ${att.size()} bytes")
+				)
+				behavior
+			case reqMsg : ReqMsg =>
+				//todo: here we could change the behavior to one where requests are stashed until the upload
+				// is finished, or where they are returned with a "please wait" response...
+				reqMsg.replyTo ! HttpResponse(Conflict,entity=HttpEntity("the resource is not yet completely uploaded. Try again later."))
+				Behaviors.same
+	}
 
-		// todo: Gone behavior may also stop itself earlier
-		def GoneBehavior: Behaviors.Receive[AcceptMsg] =
-			Behaviors.receiveMessage[AcceptMsg] { (msg: AcceptMsg) =>
-				msg match
+	// todo: Gone behavior may also stop itself earlier
+	def GoneBehavior: Behaviors.Receive[AcceptMsg] =
+		Behaviors.receiveMessage[AcceptMsg] { (msg: AcceptMsg) =>
+			msg match
 				case cmd: ReqMsg => cmd.replyTo ! HttpResponse(Gone)
-				case CreateResource(_, Do(_, req, replyTo)) =>
-					log.warn(s"received Create on resource <$uri> at <$linkPath> that has been deleted! " + 
+				case PostCreation(_, Do(_, req, replyTo)) =>
+					log.warn(s"received Create on resource <$uri> at <$linkPath> that has been deleted! " +
 						s"Message should not reach this point.")
 					replyTo ! HttpResponse(InternalServerError,entity=HttpEntity("please contact admin"))
-				Behaviors.same
-			}
+				case saved: StateSaved =>
+					log.warn(s"received a state saved on source <$uri> at <$linkPath> that has been deleted!")
+			Behaviors.same
+		}
+
+	/**
+	 * Aiming for [[https://tools.ietf.org/html/rfc7089 RFC7089 Memento]] perhaps?
+	 * See work on a [[http://timetravel.mementoweb.org/guide/api/ memento ontology]] see
+	 * [[https://groups.google.com/g/memento-dev/c/xNHUXDxPxaQ/m/DHG26vzpBAAJ 2017 discussion]] and
+	 * [[https://github.com/fcrepo/fcrepo-specification/issues/245#issuecomment-338482569 issue]].
+	 *
+	 * How much of memento can we implement quickly to get going, in order to test some other aspects such
+	 * as access control? This looks like a good starting point:
+	 * [[https://tools.ietf.org/html/rfc5829 RFC 5829 Link Relation Types for Simple Version Navigation between Web Resources]].
+	 *
+	 * We start by having one root variant for a resource, which can give rise to other
+	 * variants built from it automatically (e.g. Turtle variant can give rise to RDF/XML,
+	 * JSON/LD, etc...), but we keep the history of the principal variant.
+	 * todo: for now, we assume that we keep the same mime types throughout the life of the resource.
+	 *    allowing complexity here, tends to make one want to open the resource into a container like structure,
+	 *    as it would allow one to get all the resources together.
+	 * So we start like this:
+	 *
+	 *  1. Container receives a POST (or PUT) for a new resource
+	 *   i. `<card> -> <card>` create loop symlink (or we would need to point `<card>` to something that does not exist, or that is only partially uploaded, ...)
+	 *   i. create file `<card.0.ttl>` and pour in the content from the POST or PUT
+	 *   i. when finished relink `<card> -> <card.0.tll>`
+	 *
+	 *  1. UPDATING WITH PUT/PATCH follows a similar procedure
+	 *   i. `card -> card.v0.ttl`  starting point
+	 *   i. create `<card.1.ttl>` and save new data to that file
+	 *   i. when finished relink `<card> -> <card.1.ttl>`
+	 *   i. `<card.v1.ttl>` can have a `Link: ` header pointing to previous version `<card.0.ttl>`.
+	 *
+	 * Later we may want to allow upload of say humanly translated variants of some content.
+	 *
+	 * Note: there are many ways to do this, and there is no reason one could not have different
+	 * implementations. Some different ideas are:
+	 *  - Metadata in files
+	 *    + one can place metadata into Attributes (Java supports that)
+	 *    + or one can place metadata into a conventionally named RDF file
+	 *     (with info of how the different versions are connected)
+	 *  - Place variants in a directory to speed up search for variants
+	 *  - specialised versioning File Systems
+	 *  - implement this over CVS or git, ...
+	 *
+	 *  Here we will assume that the content of the dir is following the convention
+	 *  content.$num.extension
+	 *
+	 * @param lastVersion max version of this resource. The one the link is pointing to
+	 * @param linkTo the path of the latest reference version
+	 * @param attr basic file attributes of the latest version (do we really need this?)
+	 * @param ct: content type of all the default versions -- very limiting to start off with.
+	 */
+	class VersionsInfo(lastVersion: Int, linkTo: FPath) {
+		import akka.http.scaladsl.model.HttpMethods.{GET, HEAD, POST, DELETE, OPTIONS, PUT}
+		import akka.http.scaladsl.model.StatusCodes.{Created, InternalServerError, Gone}
+		import Resource.{lastModified,eTag,AllowHeader}
+		var PUTstarted = false
+
+		def vName(v: Int): String = name+"."+v
+		def versionUrl(v: Int): Uri =
+			val vp = uri.path.reverse.tail.reverse ++ akka.http.scaladsl.model.Uri.Path(vName(v))
+			uri.withPath(vp)
+		def versionFPath(v: Int, ext: String): FPath = linkPath.resolveSibling(vName(v)+"."+ext)
+
+		def PrevVersion(v: Int): List[LinkValue] =
+			if v > 0 then LinkValue(versionUrl(v-1),LinkParams.rel("predecessor-version"))::Nil else Nil
+		def NextVersion(v: Int): List[LinkValue] =
+			if v < lastVersion then LinkValue(versionUrl(v+1),LinkParams.rel("successor-version"))::Nil else Nil
+		def VersionLinks(v: Int): List[LinkValue] = LatestVersion::(PrevVersion(v):::NextVersion(v))
 
 		def Authorize(wd: WannaDo) =
-			if List(WebServerAgent,KeyIdAgent("/user/key#")).exists(_ == wd.from) then
+			if true || List(WebServerAgent,KeyIdAgent("/user/key#")).exists(_ == wd.from) then
 				import wd.{given, *}
-				context.self ! Do(from,req,replyTo)
+				context.self ! Do(from, req, replyTo)
 			else wd.replyTo ! HttpResponse(StatusCodes.Unauthorized,
 				Seq(`WWW-Authenticate`(HttpChallenge("Signature",s"$uri")))
 			)
 			Behaviors.same
 
 		def NormalBehavior: Behaviors.Receive[AcceptMsg] =
+			import Resource._
 			Behaviors.receiveMessage[AcceptMsg] { (msg: AcceptMsg) =>
 				msg match
-				case cr @ CreateResource(linkToPath, Do(_, req, replyTo)) =>
-					log.info(
-						s"""received POST request with headers ${req.headers} and CT=${req.entity.contentType} 
-							|Saving to: $linkToPath""".stripMargin)
-					import cr.given
-					val f: Future[IOResult] = req.entity.dataBytes.runWith(FileIO.toPath(linkToPath))
-					f.andThen ({
-						case Success(IOResult(count, _)) => replyTo ! HttpResponse(
-							Created,
-							Seq(Location(uri)),
-							HttpEntity(`text/plain(UTF-8)`, s"uploaded $count bytes")
-							)
-						case Failure(e) =>
-							log.warn(s"Unable to prcess request $cr. Deleting $linkToPath")
-							// actually one may want to allow the client to continue from where it left off
-							Files.deleteIfExists(linkToPath)
-							replyTo ! HttpResponse(
-								InternalServerError, Seq(),
-								HttpEntity(`text/x-java-source`.withCharset(`UTF-8`), e.toString)
-							)
-					})
-					//todo: here we should change the behavior to one where requests are stashed until the upload
-					// is finished, or where they are returned with a "please wait" response...
-					Behaviors.same
 				case wd: WannaDo => Authorize(wd)
 					Behaviors.same
-				case Do(_, req, replyTo) =>
+				case d@Do(_, req, replyTo) =>
 					req.method match
-						case GET => Get(req, replyTo)
-						case DELETE => Delete(req, replyTo) 
+					case GET | HEAD =>
+						replyTo ! Get(req)
+						Behaviors.same
+					case OPTIONS =>
+						replyTo ! HttpResponse ( //todo, add more
+							NoContent, AllowHeader :: Nil
+						)
+						Behaviors.same
+					case PUT =>
+						import d.given
+						Put(req,replyTo)
+						Behaviors.same
+					case DELETE => Delete(req, replyTo)
+					case m =>
+						replyTo ! HttpResponse(MethodNotAllowed,
+							AllowHeader::Nil,HttpEntity(s"method $m not supported")
+						)
+						Behaviors.same
+				case pc: PostCreation =>
+					//the PostCreation message is sent from Put(...), but it is immediately acted on
+					// and so does not come through here. Still if it comes through here it would
+					// call this method. Should it come through here?
+					BuildContent(pc)
+					 //todo: cleanup, the PUT above should create a name, and then send the PostCreation message
+					Behaviors.same
+				case StateSaved(null,replyTo) =>
+					PUTstarted = false
+					//the upload failed, but we can return info about the current state
+					val att = Files.readAttributes(linkTo, classOf[BasicFileAttributes])
+					replyTo ! HttpResponse(StatusCodes.InternalServerError,
+						Location(uri)::AllowHeader::Link(LDPR::VersionLinks(lastVersion))::headersFor(att),
+						entity=HttpEntity("PUT unsucessful")
+					)
+					Behaviors.same
+				case StateSaved(fpath,replyTo) =>
+					import java.nio.file.StandardCopyOption.ATOMIC_MOVE
+					val tmpSymLinkPath = Files.createSymbolicLink(
+						linkPath.resolveSibling(linkPath.getFileName.toString+".tmp"),
+							fpath.getFileName)
+					Files.move(tmpSymLinkPath,linkPath,ATOMIC_MOVE)
+					//todo: state saved should just return the VersionInfo.
+					val att = Files.readAttributes(fpath, classOf[BasicFileAttributes])
+					replyTo ! HttpResponse(akka.http.scaladsl.model.StatusCodes.OK,
+							Location(uri)::AllowHeader::Link(LDPR::VersionLinks(lastVersion+1))::headersFor(att),
+							HttpEntity(`text/plain(UTF-8)`, s"uploaded ${att.size()} bytes")
+					)
+					new VersionsInfo(lastVersion+1,fpath).NormalBehavior
 			}
 		end NormalBehavior
 
-		private def Get(req: HttpRequest, replyTo: ActorRef[HttpResponse]): Behavior[AcceptMsg] = 
-			import akka.http.scaladsl.model.ContentTypes.`text/html(UTF-8)`
-			import akka.http.scaladsl.model.MediaTypes.`text/html`
-			val (file, nextState) = linkToData
-			val mt: MediaType = mediaType(file)
-			val acceptHdrs = req.headers[Accept]
-			if acceptHdrs.exists{ acc => acc.mediaRanges.exists(mr => mr.matches(mt)) } then 
-				//todo: also check with the variants
-				replyTo ! HttpResponse(
+		/**
+		 * Two ways to count versions both have problems
+		 *  1. we start the process of building the new resource now, and when finished change
+		 *     the name. But what happens then if another PUT requests comes in-between?
+		 *     - If we number each version with an int, we risk overwriting an existing version
+		 *     - If create Unique names then we don't have a simple mechansims to find previous
+		 *      versions
+		 *  1. If we immediately increase the version counter by 1
+		 * 	- then if a PUT fails, we could end up with gaps in our virtual linked history
+		 *
+       *  possible answers:
+		 *    a. we save versions to a directory, where it is easy to get an oversight over
+		 *      all versions of a resource, and we can use the creation metadata of the FS to
+		 *      work out what the versions are. We can even use numbering with missing parts, because
+		 *      getting a full list of the versions and reconstituting the numbers is easy given
+		 *      that they are confined in a directory. 
+		 *    a. we need to keep a resource (attribute or file) of the versions and their relations
+		 *    a. we don't allow another PUT before the previous one is finished...
+		 *
+		 *  The last one is not the most elegant perhaps, but will work. The others options
+		 *  can be explored in other implementations.  (Note: Post as Append on LDPRs that accept
+		 *  it adds an extra twist, not taken into account here)
+		 */
+		private def Put(req: HttpRequest, replyTo: ActorRef[HttpResponse])(
+			using ec: ExecutionContext, mat: Materializer
+		): Unit = {
+			//1. we filter out all unaceptable requests, and return error responses to those
+			if PUTstarted then
+				replyTo !  HttpResponse(
+					StatusCodes.Conflict, Seq(),
+					HttpEntity("PUT already ongoing. Please try later"))
+				return ()
+
+			import headers.{`If-Match`,`If-Unmodified-Since`,EntityTag}
+			val imh = req.headers[`If-Match`]
+			val ium = req.headers[`If-Unmodified-Since`]
+			lazy val att = Files.readAttributes(linkTo, classOf[BasicFileAttributes])
+
+			if imh.isEmpty && ium.isEmpty then
+				replyTo ! HttpResponse(StatusCodes.PreconditionRequired,
+					Location(uri) :: AllowHeader :: Link(LDPR :: VersionLinks(lastVersion)) :: headersFor(att),
+					HttpEntity("LDP Servers requires valid `If-Match` or `If-Unmodified-Since` headers for a PUT")
+				)
+				return ()
+
+			val precond1 = imh.exists { case `If-Match`(range) =>
+				val et = eTag(att)
+				EntityTag.matchesRange(et.etag, range, false)
+			}
+			lazy val precond2 =
+				req.headers[`If-Unmodified-Since`].map { case `If-Unmodified-Since`(dt) =>
+					dt.clicks >= att.lastModifiedTime().toMillis
+				}
+			if !(precond1 || (precond2.size > 0 && precond2.forall(_ == true))) then
+				replyTo ! HttpResponse(StatusCodes.PreconditionFailed,
+					Location(uri) :: AllowHeader :: Link(LDPR :: VersionLinks(lastVersion)) :: headersFor(att),
+					HttpEntity("LDP Servers requires valid `If-Match` or `If-Unmodified-Since` headers for a PUT")
+				)
+				return ()
+
+			//2. We save data to storage, which if successful will lead to a new version message to be sent
+			//todo: we need to check that the extension fits the previous mime types
+			//     this is definitively clumsy.
+			linkTo.getFileName.toString.split('.').toSeq match
+				case Seq(name, ver, ext) if req.entity.contentType.mediaType.fileExtensions.contains(ext) =>
+					val linkToPath: FPath = versionFPath(lastVersion, ext)
+					PUTstarted = true
+					BuildContent(PostCreation(linkToPath, Do(WebServerAgent, req, replyTo)))
+					//todo: here we should change the behavior to one where requests are stashed until the upload
+					// is finished, or where they are returned with a "please wait" response...
+				case _ => replyTo ! HttpResponse(StatusCodes.Conflict,
+						Seq(),
+						HttpEntity("At present we can only accept a PUT with the same " +
+						"Media Type as previously sent. Which is " + extension(linkTo))
+				)
+		}
+
+
+
+		private def GetVersionResponse(path: FPath, ver: Int, mt: MediaType): HttpResponse =
+			try {
+				//todo: Akka has a MediaTypeNegotiator
+				val attr = Files.readAttributes(path, classOf[BasicFileAttributes])
+				HttpResponse(
 					StatusCodes.OK,
-					Seq(), //todo: no headers for the moment
+					lastModified(attr)::eTag(attr)::AllowHeader::Link(LDPR::VersionLinks(ver))::Nil,
 					HttpEntity.Default(
-						ContentType(mt, () => HttpCharsets.`UTF-8`),
-						linkPath.toFile.length(),
-						FileIO.fromPath(linkPath)
+						akka.http.scaladsl.model.ContentType(mt, () => HttpCharsets.`UTF-8`),
+						path.toFile.length(),
+						FileIO.fromPath(path)
 					))
-			else
-				replyTo ! HttpResponse(
+			} catch {
+				case e: Exception => HttpResponse(
+						StatusCodes.NotFound,
+						entity = HttpEntity(`text/html(UTF-8)`,
+							s"could not find attributes for content: " + e.toString
+						))
+			}
+
+
+
+		private def Get(req: HttpRequest): HttpResponse =
+			val mt: MediaType = mediaType(linkTo)
+			val acceptHdrs = req.headers[Accept]
+			if acceptHdrs.exists{ acc => acc.mediaRanges.exists(mr => mr.matches(mt)) } then {
+				import Resource.Version
+				req.uri.path.reverse.head.toString.split('.').toSeq match {
+					case p @ Seq(prefix,Version(num),ext) if mt.fileExtensions.contains(ext) =>
+						GetVersionResponse(linkPath.resolveSibling(p.mkString(".")),num,mt)
+					case Seq(prefix,Version(num)) if num >= 0 && num <= lastVersion =>
+						//the request is for a version, but mime left open
+						GetVersionResponse(linkPath.resolveSibling(s"$prefix.$num.${mt.fileExtensions.head}"),num,mt)
+					case Seq(name) => GetVersionResponse(linkTo,lastVersion,mt)
+					case _ => HttpResponse(
+						StatusCodes.NotFound,
+						entity=HttpEntity(s"could not find resource for <${req.uri}> with "+req.headers)
+					)
+				}
+			} else
+				import akka.http.scaladsl.model.ContentTypes.`text/html(UTF-8)`
+				HttpResponse(
 					StatusCodes.UnsupportedMediaType, 
 					entity=HttpEntity(`text/html(UTF-8)`,
 						s"requested content Types where $acceptHdrs but we only have $mt"
 					))
-			nextState.NormalBehavior
 		end Get
 
 		/**
@@ -355,10 +629,10 @@ class Resource(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg]) {
 					}
 			}
 			try {
-				Files.createSymbolicLink(linkPath,archiveDir)
+				Files.createSymbolicLink(linkPath,linkPath.getFileName)
 			} catch {
 				case e => 
-					log.warn(s"Could not create link to Archive directory <$linkPath> -> <$archiveDir>. " +
+					log.warn(s"could not create a self link <$linkPath> -> <$linkPath>. " +
 						s"Could lead to problems!",e)
 			}
 			
@@ -371,6 +645,7 @@ class Resource(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg]) {
 			//   - <file.count> as that gives the count for the next version.
 			//   - other ?
 			//  This indicates that it would be good to have a link to the archive
+			val variants = List() //we don't do variants yet
 			val cleanup: List[FPath] = if linkPath == linkTo then variants.toList else linkTo::variants.toList
 			cleanup.foreach{ p => 
 				try {
@@ -394,7 +669,7 @@ class Resource(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg]) {
 						log.error(s"IOException trying move link <$p> to archive.",e)
 				}
 			}
-			this.GoneBehavior
+			GoneBehavior
 		end Delete
 
 		/** Directory where an archive is stored before deletion */

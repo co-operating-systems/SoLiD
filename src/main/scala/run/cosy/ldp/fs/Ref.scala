@@ -4,8 +4,6 @@ import akka.actor.typed.ActorRef
 import akka.actor.typed.scaladsl.ActorContext
 import akka.http.scaladsl.model.Uri
 import run.cosy.ldp.fs
-import fs.BasicContainer.{ChildTerminated, Cmd}
-import fs.Resource.AcceptMsg
 import fs.Attributes.{DirAtt, SymLink, ActorFileAttr}
 import run.cosy.ldp.ResourceRegistry
 
@@ -19,8 +17,8 @@ import run.cosy.ldp.ResourceRegistry
  */
 sealed trait Ref
 
-case class CRef (att: DirAtt, actor: ActorRef[Cmd]) extends Ref
+case class CRef (att: DirAtt, actor: ActorRef[BasicContainer.AcceptMsg]) extends Ref
 
 //todo: there are actually two cases SymLinkToNothing, SymLinkToFile and SymLinkToDir
 //  the current model is a simplication that has too much implicit
-case class RRef (att: SymLink, actor: ActorRef[AcceptMsg]) extends Ref
+case class RRef (att: SymLink, actor: ActorRef[Resource.AcceptMsg]) extends Ref

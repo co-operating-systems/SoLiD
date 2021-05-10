@@ -18,5 +18,8 @@ object RDF {
 	extension (uri: Uri)
 		def toRdf: Rdf#Node = ops.URI(uri.toString)
 
+	extension (rdfUri: Rdf#URI)
+		def toAkka: Uri = Uri(ops.getString(rdfUri))
+
 }
 

@@ -22,7 +22,7 @@ import org.w3.banana.PointedGraph
 import run.cosy.http.{IResponse, RDFMediaTypes, RdfParser}
 import run.cosy.http.auth.{Agent, Anonymous, SignatureVerifier, KeyIdAgent, WebServerAgent}
 import run.cosy.ldp.ResourceRegistry
-import run.cosy.ldp.fs.{BasicContainer => BC}
+import run.cosy.ldp.{Messages => LDP}
 import scalaz.NonEmptyList
 import scalaz.NonEmptyList.nel
 
@@ -49,14 +49,19 @@ object Solid {
 			given system: ActorSystem[Nothing] = ctx.system
 			given reg : ResourceRegistry = ResourceRegistry(ctx.system)
 			val withoutSlash = uri.withPath(uri.path.reverse.dropChars(1).reverse)
-			val rootRef: ActorRef[BC.Cmd] = ctx.spawn(BasicContainer(withoutSlash, fpath), "solid")
+			val rootRef: ActorRef[LDP.Cmd] = ctx.spawn(BasicContainer(withoutSlash, fpath), "solid")
 			val registry = ResourceRegistry(system)
 			val solid = new Solid(uri, fpath, registry, rootRef)
 			given timeout: Scheduler = system.scheduler
 			given ec: ExecutionContext = ctx.executionContext
 
 			val ps = ParserSettings.forServer(system).withCustomMediaTypes(RDFMediaTypes.all :_*)
-			val serverSettings = ServerSettings(system).withParserSettings(ps)
+			val ss1 = ServerSettings(system)
+			val serverSettings = ss1.withParserSettings(ps)
+				.withServerHeader(Some(headers.Server(
+						headers.ProductVersion("reactive-solid","0.3"),
+						ss1.serverHeader.toSeq.flatMap(_.products)*)))
+				.withDefaultHostHeader(headers.Host(uri.authority.host,uri.authority.port))
 
 			val serverBinding = Http()
 				.newServerAt(uri.authority.host.address(), uri.authority.port)
@@ -143,7 +148,7 @@ class Solid(
 	baseUri: Uri,
 	path: Path,
 	registry: ResourceRegistry,
-	rootRef: ActorRef[BC.Cmd]
+	rootRef: ActorRef[LDP.Cmd]
 )(using sys: ActorSystem[_]) {
 
 	import akka.actor.typed.scaladsl.AskPattern.{Askable, schedulerFromActorSystem}
@@ -184,17 +189,16 @@ class Solid(
 		}
 	}
 
-	
 	def routeLdp(agent: Agent = new Anonymous()): Route = (reqc: RequestContext) => {
 		val path = reqc.request.uri.path
 		import reqc.{given}
 		reqc.log.info("routing req " + reqc.request.uri)
-		val (remaining, actor): (List[String], ActorRef[BC.Cmd]) = registry.getActorRef(path)
+		val (remaining, actor): (List[String], ActorRef[LDP.Cmd]) = registry.getActorRef(path)
 			.getOrElse((List[String](), rootRef))
 
-		def cmdFn(ref: ActorRef[HttpResponse]): BC.Cmd = remaining match
-			case Nil => BC.WannaDo(agent, reqc.request, ref)
-			case head :: tail => BC.RouteMsg(NonEmptyList.fromSeq(head,tail.toSeq), agent, reqc.request, ref)
+		def cmdFn(ref: ActorRef[HttpResponse]): LDP.Cmd = remaining match
+			case Nil => LDP.WannaDo(agent, reqc.request, ref)
+			case head :: tail => LDP.RouteMsg(NonEmptyList.fromSeq(head,tail.toSeq), agent, reqc.request, ref)
 
 		actor.ask[HttpResponse](cmdFn).map(RouteResult.Complete(_))
 	}

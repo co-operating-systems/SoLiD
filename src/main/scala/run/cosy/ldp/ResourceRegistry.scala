@@ -61,7 +61,7 @@ trait PathDB[T] {
  *
  * @param system not used at present
  */
-class ResourceRegistry(system: ActorSystem[_]) extends PathDB[ActorRef[BasicContainer.Cmd]] with Extension
+class ResourceRegistry(system: ActorSystem[_]) extends PathDB[ActorRef[Messages.Cmd]] with Extension
 
 
 object ResourceRegistry extends ExtensionId[ResourceRegistry] {

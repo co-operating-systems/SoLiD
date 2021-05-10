@@ -4,14 +4,14 @@ import akka.actor.typed.scaladsl.ActorContext
 import akka.http.scaladsl.model.Uri
 import run.cosy.ldp.ResourceRegistry
 import Attributes.{DirAtt, SymLink}
-import BasicContainer.{ChildTerminated, Cmd}
+import run.cosy.ldp.Messages.{ChildTerminated, Cmd}
 
 /**
  * Enforce a limited actor spawn behavior that can be tested easily
  * for a Container.
  * As a Value Type to avoid having to create an object  
  **/
-class Spawner(val context: ActorContext[Cmd]) extends AnyVal {
+class Spawner(val context: ActorContext[BasicContainer.AcceptMsg]) extends AnyVal {
 
 	import org.slf4j.Logger
 	import run.cosy.ldp.fs.Attributes.ActorFileAttr
@@ -27,7 +27,7 @@ class Spawner(val context: ActorContext[Cmd]) extends AnyVal {
 
 	def spawnSymLink(link: SymLink, url: Uri): RRef = {
 		val name = link.path.getFileName.toString
-		val ref = context.spawn(Resource(url, link.path, link.to, name), name)
+		val ref = context.spawn(Resource(url, link.path, name), name)
 		context.watchWith(ref, ChildTerminated(name))
 		RRef(link, ref)
 	}
