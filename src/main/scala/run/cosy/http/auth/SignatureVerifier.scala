@@ -2,7 +2,7 @@ package run.cosy.http.auth
 
 import akka.http.scaladsl.model.Uri
 import run.cosy.http.InvalidSigException
-import run.cosy.http.auth.{KeyidAgent, KeyIdAgent}
+import run.cosy.http.auth.{KeyidSubj, KeyIdAgent}
 import run.cosy.http.headers.Rfc8941
 import run.cosy.http.headers.Rfc8941.Bytes
 
@@ -23,7 +23,7 @@ import scala.util
  *   the implementation of Keyid can contain more informaiton than the keyid but must contain
  *   at least that.
  **/
-trait SignatureVerifier[T<:Keyid]:
+trait SignatureVerifier[T<:Keyidentifier]:
 	def verifySignature(signingStr: String, signature: Rfc8941.Bytes): Try[T]
 
 object SignatureVerifier {
@@ -63,11 +63,11 @@ object SignatureVerifier {
 		}
 
 	/** the same as pubKeyIdUriVerifier, but for protocols that don't consider the keyID to be a Uri */
-	def keyidVerifier(keydId: Rfc8941.SfString, pubKey: PublicKey, sigAlg: JSignature): SignatureVerifier[KeyidAgent] =
-		new SignatureVerifier[KeyidAgent] {
-			override def verifySignature(signingStr: String, signature: Rfc8941.Bytes): Try[KeyidAgent] =
+	def keyidVerifier(keydId: Rfc8941.SfString, pubKey: PublicKey, sigAlg: JSignature): SignatureVerifier[KeyidSubj] =
+		new SignatureVerifier[KeyidSubj] {
+			override def verifySignature(signingStr: String, signature: Rfc8941.Bytes): Try[KeyidSubj] =
 				jsigVerifier(pubKey,sigAlg)(signingStr,signature)
-					.map(_ => KeyidAgent(keydId.asciiStr, pubKey))
+					.map(_ => KeyidSubj(keydId.asciiStr, pubKey))
 		}
 
 }

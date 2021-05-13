@@ -307,7 +307,7 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 		val keyIdReady = Await.ready(futureKeyId, 2.seconds)
 		assertEquals(
 			keyIdReady.value,
-			Some(Success(run.cosy.http.auth.KeyidAgent("test-key-rsa-pss", testKeyPSSpub)))
+			Some(Success(run.cosy.http.auth.KeyidSubj("test-key-rsa-pss", testKeyPSSpub)))
 		)
 	}
 
@@ -391,7 +391,7 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 		val keyIdReady = Await.ready(futureKeyId, 2.seconds)
 		assertEquals(
 			keyIdReady.value,
-			Some(Success(run.cosy.http.auth.KeyidAgent("test-key-rsa-pss",testKeyPSSpub)))
+			Some(Success(run.cosy.http.auth.KeyidSubj("test-key-rsa-pss",testKeyPSSpub)))
 		)
 	}
 
@@ -455,7 +455,7 @@ class TestMessageSigningRFCFn extends munit.FunSuite {
 		val keyIdReady = Await.ready(futureKeyId, 2.seconds)
 		assertEquals(
 			keyIdReady.value,
-			Some(Success(run.cosy.http.auth.KeyidAgent("test-key-rsa-pss",testKeyPSSpub)))
+			Some(Success(run.cosy.http.auth.KeyidSubj("test-key-rsa-pss",testKeyPSSpub)))
 		)
 	}
 }
@@ -578,7 +578,7 @@ object TestMessageSigningRFCFn {
 	/**
 	 * emulate fetching the signature verification info for the keyids given in the Spec
 	 * */
-	def keyidFetcher(keyid: Rfc8941.SfString): Future[SignatureVerifier[KeyidAgent]] =
+	def keyidFetcher(keyid: Rfc8941.SfString): Future[SignatureVerifier[KeyidSubj]] =
 		import run.cosy.http.auth.SignatureVerifier.keyidVerifier
 		keyid.asciiStr match
 			case "test-key-rsa-pss" =>

@@ -8,15 +8,15 @@ import scala.util.Try
 
 
 trait Agent
-trait Keyid:
+trait Keyidentifier:
 	def keyId: String
-trait KeyId extends Keyid:
+trait KeyId extends Keyidentifier:
 	def keyIdUri: Uri
 	def keyId = keyIdUri.toString()
 trait PubKey:
 	def pubKey: PublicKey
 
-case class KeyidAgent(keyId: String, pubKey: PublicKey) extends Agent with Keyid with PubKey
+case class KeyidSubj(keyId: String, pubKey: PublicKey) extends Agent with Keyidentifier with PubKey
 
 /**
  * KeyId agents interpret the `keyid`  field of Message Signing as a URI.

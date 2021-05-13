@@ -11,7 +11,7 @@ import akka.http.scaladsl.server.directives.RouteDirectives.reject
 import akka.http.scaladsl.util.FastFuture
 import com.nimbusds.jose.jwk.JWK
 import com.nimbusds.jose.util.Base64
-import run.cosy.http.auth.{KeyidAgent, KeyIdAgent}
+import run.cosy.http.auth.{KeyidSubj, KeyIdAgent}
 import run.cosy.http.headers.{HSCredentials, HttpSig, Rfc8941}
 import run.cosy.http.{InvalidCreatedFieldException, InvalidExpiresFieldException, InvalidSigException}
 

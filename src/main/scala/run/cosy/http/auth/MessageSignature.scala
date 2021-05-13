@@ -12,7 +12,7 @@ import akka.http.scaladsl.server.Directives.AuthenticationResult
 import akka.http.scaladsl.server.directives.AuthenticationResult
 import akka.http.scaladsl.server.directives.AuthenticationResult.{failWithChallenge, success}
 import akka.http.scaladsl.util.FastFuture
-import run.cosy.http.auth.{Agent, KeyidAgent}
+import run.cosy.http.auth.{Agent, KeyidSubj}
 
 import java.nio.charset.StandardCharsets
 import java.security.{PrivateKey, PublicKey}
@@ -115,7 +115,7 @@ object MessageSignature {
 		 * into a function which given the HttpSig parameters
 		 * may return an Authenticated Agent
 		 **/
-		def signatureAuthN[Kid <: Keyid](
+		def signatureAuthN[Kid <: Keyidentifier](
 			fetchKeyId: Rfc8941.SfString => Future[SignatureVerifier[Kid]]
 		)(using
 			ec: ExecutionContext, clock: Clock, so : SelectorOps[HttpMessage]
