@@ -10,7 +10,7 @@ object Dependencies {
 		val AkkaHttp = "10.2.4"
 		val scalaz = "7.4.0-M7"
 		val circe = "0.14.0-M4"
-		val banana = "0.8.5-SNAPSHOT"
+		val banana = "0.8.5"
 		val alpakka = "2.0.2"
 		val bouncy = "1.68"
 		val refined = "0.9.23+7-d4890dd0-SNAPSHOT"
