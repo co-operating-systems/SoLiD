@@ -12,8 +12,7 @@ import scala.util.Success
 class TestCustomHeaders extends munit.FunSuite {
 	import run.cosy.http.headers._
 	import run.cosy.http.Encoding._
-	test("Slug".only) {
-
+	test("Slug") {
 		val blg = new Slug("blog".asClean)
 		assertEquals(blg.value,"blog",blg)
 
@@ -49,7 +48,7 @@ class TestCustomHeaders extends munit.FunSuite {
 		}
 	}
 
-	test("Slug using response.header[...] syntax".only) {
+	test("Slug using response.header[...] syntax") {
 		val slug = Slug("blog 4".asClean)
 		val request = HttpRequest().addHeader(slug)
 		assertEquals(request.header[Slug], Option(slug))

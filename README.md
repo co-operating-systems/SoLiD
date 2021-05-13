@@ -7,6 +7,8 @@ Reactive Solid is developed as part of the [Solid-Control](https://nlnet.nl/proj
 
 ### Run
 
+[![Build Status](https://www.travis-ci.com/co-operating-systems/Reactive-SoLiD.svg?branch=master)](https://www.travis-ci.com/co-operating-systems/Reactive-SoLiD)
+
 After downloading this repository you can start the server as follows:
 
 ```
