@@ -1,0 +1,20 @@
+# sbt/travis documentation
+# * http://www.scala-sbt.org/0.13/docs/Travis-CI-with-sbt.html
+# * http://docs.travis-ci.com/user/languages/scala/
+# * http://blog.travis-ci.com/2014-12-17-faster-builds-with-container-based-infrastructure/
+
+language: scala
+
+script:
+  - sbt ++$TRAVIS_SCALA_VERSION -jvm-opts .travis-jvmopts validate
+
+jdk:
+  - openjdk16
+
+scala:
+  - 3.0.0-RC3
+
+notifications:
+   email:
+      - henry.story@co-operating.systems
+
