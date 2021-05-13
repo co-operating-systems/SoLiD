@@ -32,15 +32,15 @@ class TestContainerFn extends munit.FunSuite {
 		import akka.http.scaladsl.model.HttpCharsets.*
 	
 		//todo: clearly the default encoding from Akka, will not always be to everyone's liking
-		testSlug("Readme.txt",ContentTypes.`text/plain(UTF-8)`,"Readme","Readme.conf") 
-		testSlug("MyCatFelix",mt.`image/jpeg`.toContentType,"MyCatFelix","MyCatFelix.jpe")
-		testSlug("MyCatFelix.jpg",mt.`image/gif`.toContentType,"MyCatFelix","MyCatFelix.gif")
-		testSlug("Felix had a baby.md",mt.`text/markdown`.withCharset(`UTF-8`),"Felixhadababy","Felixhadababy.markdown")
-		testSlug(null, mt.`video/mp4`.toContentType,"19700101-0","19700101-0.mp4")
-		testSlug(null, null,"19700101-0","19700101-0.a")
-		testSlug(null, mt.`application/octet-stream`.toContentType,"19700101-0","19700101-0.a")
+		testSlug("Readme.txt",ContentTypes.`text/plain(UTF-8)`,"Readme","Readme.0.conf")
+		testSlug("MyCatFelix",mt.`image/jpeg`.toContentType,"MyCatFelix","MyCatFelix.0.jpe")
+		testSlug("MyCatFelix.jpg",mt.`image/gif`.toContentType,"MyCatFelix","MyCatFelix.0.gif")
+		testSlug("Felix had a baby.md",mt.`text/markdown`.withCharset(`UTF-8`),"Felixhadababy","Felixhadababy.0.markdown")
+		testSlug(null, mt.`video/mp4`.toContentType,"19700101-0","19700101-0.0.mp4")
+		testSlug(null, null,"19700101-0","19700101-0.0.a")
+		testSlug(null, mt.`application/octet-stream`.toContentType,"19700101-0","19700101-0.0.a")
 
-		testSlug("Readme_2",ContentTypes.`text/plain(UTF-8)`,"Readme2","Readme2.conf")
+		testSlug("Readme_2",ContentTypes.`text/plain(UTF-8)`,"Readme2","Readme2.0.conf")
 	}
 	
 	test("Link relations") {

@@ -14,6 +14,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import run.cosy.{Solid, SolidTest}
 import run.cosy.http.headers.Slug
+import run.cosy.ldp.Messages
 import run.cosy.ldp.fs.BasicContainer
 import org.w3.banana._
 
@@ -55,8 +56,8 @@ class TestSolidLDPAuthSpec extends AnyWordSpec with Matchers with ScalatestRoute
 
 	def withServer(test: Solid => Any): Unit =
 		val testKit = ActorTestKit()
-		val rootCntr: Behavior[BasicContainer.Cmd] = BasicContainer(rootUri, dirPath)
-		val rootActr: ActorRef[BasicContainer.Cmd] = testKit.spawn(rootCntr, "solid")
+		val rootCntr: Behavior[BasicContainer.AcceptMsg] = BasicContainer(rootUri, dirPath)
+		val rootActr: ActorRef[BasicContainer.AcceptMsg] = testKit.spawn(rootCntr, "solid")
 		val solid = new Solid(rootUri, dirPath, registry, rootActr)
 		try {
 			test(solid)
@@ -74,7 +75,7 @@ class TestSolidLDPAuthSpec extends AnyWordSpec with Matchers with ScalatestRoute
 			}
 
 		def newContainer(baseDir: Uri, slug: Slug): Uri =
-			Req.Post(baseDir).withHeaders(slug,BasicContainer.ldpcLinkHeaders) ~>
+			Req.Post(baseDir).withHeaders(slug,BasicContainer.LinkHeaders) ~>
 				solid.routeLdp(agent) ~> check {
 				status shouldEqual StatusCodes.Created
 				header[Location].get.uri

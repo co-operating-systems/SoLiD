@@ -11,6 +11,7 @@ import akka.http.scaladsl.model.Uri.Path
 import akka.http.scaladsl.model.{ContentTypes, HttpEntity, HttpRequest, MediaRange, MediaRanges, MediaTypes}
 import run.cosy.ldp.ResourceRegistry
 import run.cosy.ldp.fs.BasicContainer
+import run.cosy.ldp.Messages
 
 import java.nio.file.Files
 import org.scalatest.BeforeAndAfterAll
@@ -51,8 +52,8 @@ class TestContainerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers
 		val rootUri = Uri("http://localhost:8080")
 
 		given registry: ResourceRegistry = ResourceRegistry(testKit.system)
-		val rootCntr: Behavior[BasicContainer.Cmd] = BasicContainer(rootUri,dirPath)
-		val rootActr: ActorRef[BasicContainer.Cmd] = testKit.spawn(rootCntr,"solid")
+		val rootCntr: Behavior[BasicContainer.AcceptMsg] = BasicContainer(rootUri,dirPath)
+		val rootActr: ActorRef[BasicContainer.AcceptMsg] = testKit.spawn(rootCntr,"solid")
 		val probe = testKit.createTestProbe[HttpResponse]()
 		given classic : ActorSystem = testKit.system.classicSystem
 		given ec: ExecutionContext = testKit.system.executionContext
@@ -60,7 +61,7 @@ class TestContainerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers
 		{
 			//create Hello
 			import _root_.run.cosy.http.Encoding.{given, *}
-			rootActr ! BasicContainer.Do(
+			rootActr ! Messages.Do(
 				WebServerAgent,
 				HttpRequest(
 					POST,
@@ -77,7 +78,7 @@ class TestContainerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers
 		}
 		{
 			// Read Hello
-			rootActr ! BasicContainer.RouteMsg(
+			rootActr ! Messages.RouteMsg(
 				NonEmptyList("Hello"),
 				WebServerAgent,
 				HttpRequest(
