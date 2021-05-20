@@ -12,7 +12,7 @@ import akka.http.scaladsl.model.Uri
  *
  **/
 object RDF {
-	export Jena.*
+	export Jena._
 	export Jena.given
 
 	extension (uri: Uri)

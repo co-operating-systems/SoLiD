@@ -14,9 +14,11 @@ object Dependencies {
 		val alpakka = "2.0.2"
 		val bouncy = "1.68"
 		val refined = "0.9.23+7-d4890dd0-SNAPSHOT"
-		val catsParse = "0.3.2"
-		val catsCore = "2.6.0"
-		val scalatest = "3.2.8"
+		val catsParse = "0.3.4"
+		val catsCore = "2.6.1"
+		val catsFree = catsCore
+		val catsEffect = "3.1.1"
+		val scalatest = "3.2.9"
 		val titaniumJSonLD = "1.0.0"
 		val nimbusDS = "9.9"
 		val logback = "1.2.3"
@@ -74,29 +76,13 @@ object Dependencies {
 			"net.bblfish.rdf" % "banana-jena" % V.banana
 		)
 
-		/**
-		 * available for Scala 3.0.0-RC2 but not RC3
-		 * MIT License
-		 *
-		 * @see https://github.com/typelevel/cats-parse
-		 * @see https://mvnrepository.com/artifact/org.typelevel/cats-parse
-		 */
-		val catsParse = "org.typelevel" %% "cats-parse" % V.catsParse
-
-		/**
-		 * Note is available as Scala3 but cats-parse is not there yet.
-		 *
-		 * @see https://mvnrepository.com/artifact/org.typelevel/cats-core
-		 * @see https://github.com/typelevel/cats
-		 * */
-		val catsCore = "org.typelevel" %% "cats-core" % V.catsCore
 
 		//	val refined = Seq(
 		//		"eu.timepit" %% "refined"                 % refinedVersion,
 		//		"eu.timepit" %% "refined-cats"            % refinedVersion // optional
 		//	).map(_.exclude("org.scala-lang.modules","scala-xml_2.13"))
 
-		def allCompatibleLibs = (Seq(scalaz, alpakka, catsParse, catsCore) ++ akka ++ akkaTest ++ banana)
+		def allCompatibleLibs = (Seq(scalaz, alpakka) ++ akka ++ akkaTest ++ banana)
 			.map(o => o cross CrossVersion.for3Use2_13)
 	}
 
@@ -113,6 +99,35 @@ object Dependencies {
 		val scalatest = "org.scalatest" %% "scalatest" % V.scalatest % Test
 
 		/**
+		 * MIT License
+		 *
+		 * @see https://github.com/typelevel/cats-parse
+		 * @see https://mvnrepository.com/artifact/org.typelevel/cats-parse
+		 */
+		val catsParse = "org.typelevel" %% "cats-parse" % V.catsParse
+
+		/**
+		 * MIT License
+		 * @see https://mvnrepository.com/artifact/org.typelevel/cats-core
+		 * @see https://github.com/typelevel/cats
+		 * */
+		val catsCore = "org.typelevel" %% "cats-core" % V.catsCore
+
+		/**
+		 * MIT License
+		 * @see https://mvnrepository.com/artifact/org.typelevel/cats-effect
+		 * @see https://github.com/typelevel/cats-effect
+		 * */
+		val catsEffect = "org.typelevel" %% "cats-effect" % V.catsEffect
+
+		/**
+		 * MIT License
+		 * @see https://mvnrepository.com/artifact/org.typelevel/cats-free
+		 * @see https://github.com/typelevel/cats-free
+		 * */
+		val catsFree = "org.typelevel" %% "cats-free" % V.catsFree
+
+		/**
 		 * Apache 2 License
 		 *
 		 * @see [[https://scalameta.org/munit/docs/getting-started.html Getting Started]]
@@ -120,7 +135,7 @@ object Dependencies {
 		 */
 		val munit = "org.scalameta" %% "munit" % "0.7.25" % Test
 
-		val all = Seq(scalatest, munit)
+		val all = Seq(scalatest, munit, catsParse, catsCore, catsFree)
 	}
 
 	//

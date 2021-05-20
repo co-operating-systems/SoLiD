@@ -365,6 +365,10 @@ class BasicContainer private(
 		import scala.annotation.tailrec
 
 		def Authorize(wd: WannaDo): Behavior[AcceptMsg] =
+			//we have to build a future to fetch the DataSets needed
+			// or a future that calculates the Authorization of the user using those datasets
+			// then we can use that future
+			// context.context.pipeToSelf(futureCalc){ case success ... case failure ... }
 			context.log.info(s"in Authorize for $dirPath. received $wd")
 			if true || List(WebServerAgent,KeyIdAgent("/user/key#")).exists(_ == wd.from) then
 				import wd.{given,_}
