@@ -12,7 +12,7 @@ jdk:
   - openjdk16
 
 scala:
-  - 3.0.0-RC3
+  - 3.0.0
 
 notifications:
    email:
