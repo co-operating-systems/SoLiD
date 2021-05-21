@@ -4,6 +4,7 @@ import run.cosy.RDF
 import akka.http.scaladsl.model._
 import scala.collection.immutable.HashMap
 import org.apache.jena.riot.lang.RiotParsers
+import cats.free.Cofree
 // import org.w3.banana.{PointedGraph=>PG}
 
 class LDPCmdTst extends munit.FunSuite {
@@ -18,9 +19,7 @@ class LDPCmdTst extends munit.FunSuite {
 	val foaf = org.w3.banana.FOAFPrefix[Rdf]
 
 	import cats.implicits._
-	// val pg2 = PG[Rdf](URI("/People/Berners-Lee/.acl"),Graph())
-	// val pg1 = PG[Rdf](URI("/"),Graph())
-	// import org.w3.banana.binder.PGBinder.FromPGToPG2PGBinder
+
 	import org.w3.banana.binder.ToNode
 	import org.w3.banana.binder.ToNode.{given,_}
 
@@ -81,18 +80,50 @@ class LDPCmdTst extends munit.FunSuite {
 			}
 	}
 		
-	test("fetch included graph for </People/Berners-Lee/card.acl>") {
+	test("fetch included graphs for </People/Berners-Lee/card.acl>") {
 		val graphs = fetchWithImports(w3cu("/People/Berners-Lee/card.acl")).foldMap(simpleCompiler)
 		assertEquals(graphs.size,3)
 		assertEquals(graphs.map(_._1).toSet, 
 			Set(w3cu("/.acl"),w3cu("/People/Berners-Lee/.acl"), w3cu("/People/Berners-Lee/card.acl")))
 	}
 
-	test("fetch included graph for </People/.acl>") {
+	test("fetch included graphs for </People/.acl>") {
 		val graphs = fetchWithImports(w3cu("/People/.acl")).foldMap(simpleCompiler)
 		assertEquals(graphs.size,2)
 		assertEquals(graphs.map(_._1).toSet, 
 			Set(w3cu("/.acl"),w3cu("/People/.acl")))
+	}
+	//simple Fix and Cofree as as defined in http://tpolecat.github.io/presentations/cofree/slides#19 
+	case class Fix[F[_]](f: F[Fix[F]])
+	case class CoFree[F[_], A](head: A, tail: F[CoFree[F, A]])
+
+	// Graph Functor -- modelled on ProfF 
+	case class GraF[A](g: Rdf#Graph, other: Set[A]=Set())
+
+	test("Free") {
+		type Graphs = Fix[GraF]
+		// the fixpoints of GF is just a non-empty set of Graphs.
+		val g: Graphs = Fix(GraF(cardAcl,Set(
+				Fix(GraF(BLAcl,Set()))))
+			)
+	}
+	//import cats.{Eval,Now}
+
+	test("simple CoFree") {
+		//Cofree as as defined in http://tpolecat.github.io/presentations/cofree/slides#19 
+		case class CoFree[F[_], A](head: A, tail: F[CoFree[F, A]])
+		type NG = CoFree[GraF,Uri]
+
+		//Here we see how we can create a   
+		val gsRoot: NG = CoFree(Uri("/.acl"), GraF(rootACL,Set()))
+		val gs: NG = CoFree(Uri("/People/.acl"), GraF(pplAcl, Set(gsRoot)))
+		val gs2: NG = CoFree(Uri("/People/Berners-Lee/.acl"), GraF(BLAcl,Set(gsRoot)))
+		val gs3: NG = CoFree(Uri("/People/Berners-Lee/card.acl"), GraF(cardAcl,Set(gs2)))
+		println(gs3)
+		println("-----")
+		type DataSet = GraF[CoFree[GraF,Uri]]
+		val x: DataSet = gs3.tail
+		println(x)
 	}
 
 

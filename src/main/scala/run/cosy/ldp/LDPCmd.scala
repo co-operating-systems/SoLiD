@@ -17,6 +17,9 @@ type LDPScript[A] = Free[LDPCmd,A]
 object LDPCmd {
 	type NamedGraph = (Uri, Rdf#Graph)
 	type NamedGraphs = Map[Uri,Rdf#Graph]
+
+
+
 	/**
 	 * LDP DataSets, where Graphs are named by URLs and retrievable from that location. 
 	 * The first URI is the default graph.
