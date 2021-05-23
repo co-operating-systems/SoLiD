@@ -45,7 +45,14 @@ class LDPCmdTst extends munit.FunSuite {
 		URI("/People/Berners-Lee/card#i") -- wac.accessToClass ->- ( 
 			bnode() -- containedIn ->- URI("/People/Berners-Lee/")
 		)
-	)) union w3c(URI("/People/Berners-Lee/.acl") -- owl.imports ->- URI("/.acl"))
+	)) union w3c(
+		URI("/People/Berners-Lee/.acl") -- owl.imports ->- URI("/.acl")
+	)
+
+	// we also want to consider the world where the full import hierarchy is preserved
+	val BLAcl2 = BLAcl union w3c(
+				URI("/People/Berners-Lee/.acl") -- owl.imports ->- URI("/People/.acl")
+			)
 
 	val pplAcl = w3c(
 		URI("/People/.acl#AdminRl") 
@@ -64,67 +71,80 @@ class LDPCmdTst extends munit.FunSuite {
 
 	import cats.arrow.FunctionK
 	import cats.catsInstancesForId
-	import cats.{Id, ~>}
-
-	def simpleCompiler: LDPCmd ~> Id = new (LDPCmd ~> Id) {
-		val server: Map[Uri, Rdf#Graph] = Map(
+	import cats.{Id, ~>, Now}
+	
+	val server: Map[Uri, Rdf#Graph] = Map(
 			w3cu("/.acl") -> rootACL,
 			w3cu("/People/.acl") -> pplAcl,
 			w3cu("/People/Berners-Lee/.acl") -> BLAcl,
 			w3cu("/People/Berners-Lee/card.acl") -> cardAcl
 		)
 
+	val server2 = server + (w3cu("/People/Berners-Lee/.acl") -> BLAcl2)
+
+
+	def simpleCompiler(db: Map[Uri, Rdf#Graph]): LDPCmd ~> Id = new (LDPCmd ~> Id) {	
 		def apply[A](cmd: LDPCmd[A]): Id[A] = 
 			cmd match {
-				case Get(url) => server.get(url).asInstanceOf[A]
+				case Get(url) => db.get(url).asInstanceOf[A]
 			}
 	}
-		
+
+	import cats.{Applicative,CommutativeApplicative, Eval}
+	// given GraFUnorderedTraverse: cats.UnorderedTraverse[GraF] with  
+	// 	override 
+	// 	def unorderedTraverse[G[_]: CommutativeApplicative, A, B](sa: GraF[A])(f: A => G[B]): G[GraF[B]] = 
+	// 		sa.other.unorderedTraverse(f).map(ss => sa.copy(other=ss))
+	
+			
 	test("fetch included graphs for </People/Berners-Lee/card.acl>") {
-		val graphs = fetchWithImports(w3cu("/People/Berners-Lee/card.acl")).foldMap(simpleCompiler)
-		assertEquals(graphs.size,3)
-		assertEquals(graphs.map(_._1).toSet, 
-			Set(w3cu("/.acl"),w3cu("/People/Berners-Lee/.acl"), w3cu("/People/Berners-Lee/card.acl")))
+      //build the graphs Data structure
+		val ds: ReqDataSet = fetchWithImports(w3cu("/People/Berners-Lee/card.acl")).foldMap(simpleCompiler(server))
+
+		//count the graphs in ds
+		def countGr(ds: ReqDataSet): Eval[Int] = Cofree.cata[GraF,Meta,Int](ds){(meta, ds) => cats.Now( 1 + ds.other.fold(0)(_+_)) }
+		assertEquals(countGr(ds).value,3)
+
+		//return the top NamedGraph of the dataset
+		def toNG(ds: ReqDataSet): Eval[(Uri,Rdf#Graph)] = Now(ds.head.url -> ds.tail.value.default)
+
+		
+		//check that the output is the same as the full info on the server
+		//note this does not keep the structure
+		val namedGraphs = ds.coflatMap(toNG).foldLeft[List[(Uri,Rdf#Graph)]](List())((l, b) => b.value::l)
+		assertEquals(Map(namedGraphs.toSeq*),server - w3cu("/People/.acl"))
+
+      //build the graphs Data structure for the altered server
+		val ds2: ReqDataSet = fetchWithImports(w3cu("/People/Berners-Lee/card.acl")).foldMap(simpleCompiler(server2))
+		
+		assertEquals(countGr(ds2).value,4)
+		assertEquals(Map(ds2.coflatMap(toNG).foldLeft[List[(Uri,Rdf#Graph)]](List())((l, b) => b.value::l).toSeq*),server2)
+
+		
+		import cats.Now
+		// This shows the general structure of the result. 
+		// We see that there are some arbitrariness as to what the parent of the root acl is: here it is
+		//  <https://w3.org/People/Berners-Lee/.acl> 
+		// The nesting of Graphs makes sense if say the request were fetched via a certain agent (a proxy perhaps). 
+		// In that case nested graph metadata would really need to include Agent information.
+		val urlTree = ds2.mapBranchingS(new (GraF ~> List) { def apply[A](gr: GraF[A]): List[A]  = gr.other }).map(_.url).forceAll
+		assertEquals(urlTree, 
+				Cofree(Uri("https://w3.org/People/Berners-Lee/card.acl"),
+					Now(List(Cofree(Uri("https://w3.org/People/Berners-Lee/.acl"),
+						Now(List(Cofree(Uri("https://w3.org/People/.acl"), Now(Nil)),
+							Cofree(Uri("https://w3.org/.acl"), Now(Nil)))))))))
+		//we want to see if the nesting is correct, even if we don't really need the nesting at this point
 	}
 
-	test("fetch included graphs for </People/.acl>") {
-		val graphs = fetchWithImports(w3cu("/People/.acl")).foldMap(simpleCompiler)
-		assertEquals(graphs.size,2)
-		assertEquals(graphs.map(_._1).toSet, 
-			Set(w3cu("/.acl"),w3cu("/People/.acl")))
-	}
-	//simple Fix and Cofree as as defined in http://tpolecat.github.io/presentations/cofree/slides#19 
-	case class Fix[F[_]](f: F[Fix[F]])
-	case class CoFree[F[_], A](head: A, tail: F[CoFree[F, A]])
 
-	// Graph Functor -- modelled on ProfF 
-	case class GraF[A](g: Rdf#Graph, other: Set[A]=Set())
-
-	test("Free") {
+	test("What is a Fix[GraF]?") {
+	 	//simple Fix as as defined in http://tpolecat.github.io/presentations/cofree/slides#19 
+		case class Fix[F[_]](f: F[Fix[F]])
 		type Graphs = Fix[GraF]
 		// the fixpoints of GF is just a non-empty set of Graphs.
-		val g: Graphs = Fix(GraF(cardAcl,Set(
-				Fix(GraF(BLAcl,Set()))))
+		val g: Graphs = Fix(GraF(cardAcl,List(
+				Fix(GraF(BLAcl,List()))))
 			)
 	}
-	//import cats.{Eval,Now}
-
-	test("simple CoFree") {
-		//Cofree as as defined in http://tpolecat.github.io/presentations/cofree/slides#19 
-		case class CoFree[F[_], A](head: A, tail: F[CoFree[F, A]])
-		type NG = CoFree[GraF,Uri]
-
-		//Here we see how we can create a   
-		val gsRoot: NG = CoFree(Uri("/.acl"), GraF(rootACL,Set()))
-		val gs: NG = CoFree(Uri("/People/.acl"), GraF(pplAcl, Set(gsRoot)))
-		val gs2: NG = CoFree(Uri("/People/Berners-Lee/.acl"), GraF(BLAcl,Set(gsRoot)))
-		val gs3: NG = CoFree(Uri("/People/Berners-Lee/card.acl"), GraF(cardAcl,Set(gs2)))
-		println(gs3)
-		println("-----")
-		type DataSet = GraF[CoFree[GraF,Uri]]
-		val x: DataSet = gs3.tail
-		println(x)
-	}
-
 
 }
