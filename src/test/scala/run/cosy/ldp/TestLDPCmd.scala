@@ -5,6 +5,8 @@ import akka.http.scaladsl.model._
 import scala.collection.immutable.HashMap
 import org.apache.jena.riot.lang.RiotParsers
 import cats.free.Cofree
+import scala.util.Failure
+import scala.util.Success
 // import org.w3.banana.{PointedGraph=>PG}
 
 class LDPCmdTst extends munit.FunSuite {
@@ -82,12 +84,13 @@ class LDPCmdTst extends munit.FunSuite {
 
 	val server2 = server + (w3cu("/People/Berners-Lee/.acl") -> BLAcl2)
 
-
+	import akka.http.scaladsl.model.StatusCodes
 	def simpleCompiler(db: Map[Uri, Rdf#Graph]): LDPCmd ~> Id = new (LDPCmd ~> Id) {	
-		def apply[A](cmd: LDPCmd[A]): Id[A] = 
-			cmd match {
-				case Get(url) => db.get(url).asInstanceOf[A]
-			}
+		def apply[A](cmd: LDPCmd[A]): Id[A] =  cmd match 
+			case Get(url) => db.get(url) match 
+				case Some(g) => Response(Meta(url,StatusCodes.OK,Seq()),Success(g)).asInstanceOf[A] 
+				//todo: Create an exception for this that can be re-used
+				case None => Response(Meta(url,StatusCodes.NotFound,Seq()),Failure(new Exception("no content"))).asInstanceOf[A]
 	}
 
 	import cats.{Applicative,CommutativeApplicative, Eval}

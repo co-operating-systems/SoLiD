@@ -13,15 +13,45 @@ import akka.http.scaladsl.model.HttpHeader
 import akka.http.scaladsl.model.{StatusCode,StatusCodes}
 import cats.Now
 import cats.Applicative
+import scala.util.Try
+import scala.util.Success
 
 sealed trait LDPCmd[A]
-case class Get[T](url: Uri) extends LDPCmd[Option[T]]
 
 type LDPScript[A] = Free[LDPCmd,A]
 
 object LDPCmd {
 	// type NamedGraph = (Uri, Rdf#Graph)
 	// type NamedGraphs = Map[Uri,Rdf#Graph]
+
+	/** 
+	 * some Metadata on the resource from the server.
+	 * @param the response on the message - whether the request failed or not
+	 * @param url the URL of the resource
+	 * @param headers: Seq of Http Headers (this could also be represented as a Graph) 
+	 */
+	case class Meta(url: Uri, code: StatusCode=StatusCodes.OK,  headers: Seq[HttpHeader]=Seq())
+	
+	/**
+	 * A response to a request.
+	 * The Metadata tells if the response succeeded, what the problems may have been, etc...
+	 * The content, is an attempted parse of the stream to the object type.
+	 **/
+	case class Response[T](meta: Meta, content: Try[T])
+
+	/** 
+	 * Get response from URL. 
+	 *  
+ 	 * ideas: one may want to pass 
+	 *  - etag, date-since-previous-version, 
+	 *  - authenticated agent info,
+	 *  - content-type? 
+	 *  - ...  
+ 	 * The return type is a T. To start we want this to be RDF types: Graph, DataSets. 
+	 * How far could one generalise that? Allow T to be a stream too? A DOM? Clearly the more generality one allows
+	 * the more the GET needs to specify restrictions on the return type.
+	**/
+	case class Get[T](url: Uri) extends LDPCmd[Response[T]]
 
 	/*
 	 * CoFree as as defined in [[http://tpolecat.github.io/presentations/cofree/slides#19 tpolecat's Fixpoint slides]].
@@ -39,13 +69,6 @@ object LDPCmd {
 	 **/
 	case class GraF[A](default: Rdf#Graph, other: List[A]=List())
 
-	/** 
-	 * some Metadata on the resource from the server.
-	 * @param the response on the message - whether the request failed or not
-	 * @param url the URL of the resource
-	 * @param headers: Seq of Http Headers (this could also be represented as a Graph) 
-	 */
-	case class Meta(url: Uri, code: StatusCode=StatusCodes.OK,  headers: Seq[HttpHeader]=Seq())
 	
 	/**
 	 * A recursively defined DataSet where the first layer points to a Cofree graph with no
@@ -79,7 +102,7 @@ object LDPCmd {
 		def foldRight[A, B](fa: GraF[A], lb: cats.Eval[B])(f: (A, cats.Eval[B]) => cats.Eval[B]): cats.Eval[B] = ???
 	
 
-	def get[T](key: Uri): LDPScript[Option[T]] = liftF[LDPCmd, Option[T]](Get[T](key))
+	def get[T](key: Uri): LDPScript[Response[T]] = liftF[LDPCmd, Response[T]](Get[T](key))
 
 	/**
 	 * Build a Script to fetch owl:imports links starting from a graph at u, avoiding visted ones.
@@ -94,16 +117,17 @@ object LDPCmd {
 	def fetchWithImports(u: Uri, visited: Set[Uri]=Set()) : LDPScript[ReqDataSet] = for {
 		gOpt <- get[Rdf#Graph](u)
 		ngs: ReqDataSet <- gOpt match 
-			case Some(g) => 
+			case Response(Meta(url, StatusCodes.OK, headers),Success(graph)) => 
 				import cats.syntax.all.toTraverseOps
-				val imports: List[Uri] = find(g, ANY, owl.imports, ANY).toList.collect{ case Triple(_,_,o: Rdf#URI) => o.toAkka }
+				val imports: List[Uri] = find(graph, ANY, owl.imports, ANY).toList.collect{ case Triple(_,_,o: Rdf#URI) => o.toAkka }
 				val newVisited = visited+u
 				val newImports = imports.filterNot(newVisited.contains(_))
 				val covered = newVisited ++ newImports
 				val lstOfScrpDs: List[LDPScript[ReqDataSet]] = newImports.map(u => fetchWithImports(u, covered))
-				lstOfScrpDs.sequence.map(subs => Cofree(Meta(u),Now(GraF(g,subs.toList))))
-			case None => //todo: remove need to invent status code
-				cats.free.Free.pure[LDPCmd,ReqDataSet](Cofree(Meta(u,StatusCodes.NotFound), Now(GraF(Graph.empty,Nil))))
+				lstOfScrpDs.sequence.map(subs => Cofree(Meta(u),Now(GraF(graph,subs.toList))))
+			case Response(meta,_) => //any other result is problematic for the moment. 
+			   //todo: pass more detailed error info into the result below - needed to explain problems
+				cats.free.Free.pure[LDPCmd,ReqDataSet](Cofree(meta, Now(GraF(Graph.empty,Nil))))
 	} yield ngs
 	
 }
