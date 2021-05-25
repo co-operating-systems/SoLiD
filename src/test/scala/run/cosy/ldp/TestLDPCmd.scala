@@ -53,8 +53,8 @@ class LDPCmdTst extends munit.FunSuite {
 
 	// we also want to consider the world where the full import hierarchy is preserved
 	val BLAcl2 = BLAcl union w3c(
-				URI("/People/Berners-Lee/.acl") -- owl.imports ->- URI("/People/.acl")
-			)
+			URI("/People/Berners-Lee/.acl") -- owl.imports ->- URI("/People/.acl")
+		)
 
 	val pplAcl = w3c(
 		URI("/People/.acl#AdminRl") 

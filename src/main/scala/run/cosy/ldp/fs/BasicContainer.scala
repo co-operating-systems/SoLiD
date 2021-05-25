@@ -370,11 +370,10 @@ class BasicContainer private(
 			// then we can use that future
 			// context.context.pipeToSelf(futureCalc){ case success ... case failure ... }
 			context.log.info(s"in Authorize for $dirPath. received $wd")
-			if true || List(WebServerAgent,KeyIdAgent("/user/key#")).exists(_ == wd.from) then
-				import wd.{given,_}
+			if true || List(WebServerAgent,KeyIdAgent("/user/key#")).exists(_ == wd.msg.from) then
 				//todo: authorization will result in a Future, so one will then use context.pipeToSelf
-				context.context.self ! Do(from,req,replyTo)
-			else wd.replyTo ! HttpResponse(StatusCodes.Unauthorized,
+				context.context.self ! wd.toDo
+			else wd.msg.replyTo ! HttpResponse(StatusCodes.Unauthorized,
 				Seq(`WWW-Authenticate`(HttpChallenge("Signature",s"$dirPath")))
 			)
 			Behaviors.same
@@ -399,7 +398,7 @@ class BasicContainer private(
 						//should ACL rules be set up here, or on startup? What else can be done on creation?
 //						createACL(null)
 						//reply that done
-						create.cmd.replyTo ! HttpResponse(
+						create.cmd.msg.replyTo ! HttpResponse(
 							Created,
 							Location(containerUrl.withPath(containerUrl.path / ""))::LinkHeaders::AllowHeader::Nil
 						)
@@ -631,25 +630,25 @@ class BasicContainer private(
 		//  but getRef can also return a RRef... So `cat.jpg`
 		//  here would return a `cat.jpg` RRef rather than `cat` or a `CRef`
 		//  this indicates that the path name must be set after checking the attributes!
-		def forwardToContainer(name: String, msg: ReqMsg with Route): Behavior[AcceptMsg] = {
+		def forwardToContainer(name: String, route: Route): Behavior[AcceptMsg] = {
 			if name.contains('.') then
-				msg.replyTo ! HttpResponse(NotFound,
-					entity=HttpEntity("This Solid server serves no resources with a '.' char in path segments (except for the last `file` segment)."))
+				route.msg.returnError(HttpResponse(NotFound,
+					entity=HttpEntity("This Solid server serves no resources with a '.' char in path segments (except for the last `file` segment).")))
 				Behaviors.same
 			else getRef(name) match
 				case Some(x, dir) =>
 					x match
-					case CRef(att, actor) => actor ! msg
+					case CRef(att, actor) => actor ! route
 					case RRef(att, actor) => // there is no container, so redirect to resource
-						msg match
+						route match
 						case WannaDo(agent, req, replyTo) =>  //we're at the path end, so we can redirect
-							val uri = msg.req.uri
+							val uri = req.uri
 							val redirectTo = uri.withPath(uri.path.reverse.tail.reverse)
-							replyTo ! HttpResponse(MovedPermanently, Seq(Location(redirectTo)))
+							route.msg.returnError(HttpResponse(MovedPermanently, Seq(Location(redirectTo))))
 						case RouteMsg(path, agent, req, replyTo) => // the path passes through a file, so it must end here
-							replyTo ! HttpResponse(NotFound, Seq(), s"Resource with URI ${req.uri} does not exist")
-					case _: Archived => msg.replyTo ! HttpResponse(Gone)
-					case _: OtherAtt => msg.replyTo ! HttpResponse(NotFound)
+							route.msg.returnError(HttpResponse(NotFound, Seq(), s"Resource with URI ${req.uri} does not exist"))
+					case _: Archived => route.msg.returnError(HttpResponse(Gone))
+					case _: OtherAtt => route.msg.returnError(HttpResponse(NotFound))
 					dir.start
 				case None =>
 					msg.replyTo ! HttpResponse(NotFound,

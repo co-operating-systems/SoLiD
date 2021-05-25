@@ -16,14 +16,17 @@ import cats.Applicative
 import scala.util.Try
 import scala.util.Success
 
+
 /** 
  * Commands on the Server. All commands are executed agains on a resource
  * named by a URL.
  */ 
 sealed trait LDPCmd[A]:
-   val url: Uri
+   def url: Uri
 
 object LDPCmd {
+	type LDPScript[A] = cats.free.Free[LDPCmd,A]
+
 	// type NamedGraph = (Uri, Rdf#Graph)
 	// type NamedGraphs = Map[Uri,Rdf#Graph]
 
@@ -76,7 +79,6 @@ object LDPCmd {
 	 * todo: We use List here, as I can't figure out how to get CommutativeTraverse to Work for Set
 	 **/
 	case class GraF[A](default: Rdf#Graph, other: List[A]=List())
-
 	
 	/**
 	 * A recursively defined DataSet where the first layer points to a Cofree graph with no
@@ -90,7 +92,6 @@ object LDPCmd {
 	 */ 
 	type RDataSet = GraF[Cofree[GraF,Meta]]
 	
-
 	/**
 	 * MetaData on a Request for a DataSet
 	 * eg Cofree(Meta(Uri("/.acl"),GraF(ttl"<> a TeaPot.", Set( ... other datasets ...))))
@@ -109,6 +110,11 @@ object LDPCmd {
 		override
 		def foldRight[A, B](fa: GraF[A], lb: cats.Eval[B])(f: (A, cats.Eval[B]) => cats.Eval[B]): cats.Eval[B] = ???
 	
+	given CmdFunctor: cats.Functor[LDPCmd] with 
+		def map[A, B](fa: LDPCmd[A])(f: A => B): LDPCmd[B] = fa match 
+			case Get(url,k) => Get(url, k andThen f)
+
+		
 
 	def get(key: Uri): Script[Response] = liftF[LDPCmd, Response](Get[Response](key,identity))
 
