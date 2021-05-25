@@ -87,10 +87,10 @@ class LDPCmdTst extends munit.FunSuite {
 	import akka.http.scaladsl.model.StatusCodes
 	def simpleCompiler(db: Map[Uri, Rdf#Graph]): LDPCmd ~> Id = new (LDPCmd ~> Id) {	
 		def apply[A](cmd: LDPCmd[A]): Id[A] =  cmd match 
-			case Get(url) => db.get(url) match 
-				case Some(g) => Response(Meta(url,StatusCodes.OK,Seq()),Success(g)).asInstanceOf[A] 
+			case Get(url,f) => db.get(url) match 
+				case Some(g) => f(Response(Meta(url,StatusCodes.OK,Seq()),Success(g)))
 				//todo: Create an exception for this that can be re-used
-				case None => Response(Meta(url,StatusCodes.NotFound,Seq()),Failure(new Exception("no content"))).asInstanceOf[A]
+				case None => f(Response(Meta(url,StatusCodes.NotFound,Seq()),Failure(new Exception("no content"))))
 	}
 
 	import cats.{Applicative,CommutativeApplicative, Eval}

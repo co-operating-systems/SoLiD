@@ -16,13 +16,19 @@ import cats.Applicative
 import scala.util.Try
 import scala.util.Success
 
-sealed trait LDPCmd[A]
-
-type LDPScript[A] = Free[LDPCmd,A]
+/** 
+ * Commands on the Server. All commands are executed agains on a resource
+ * named by a URL.
+ */ 
+sealed trait LDPCmd[A]:
+   val url: Uri
 
 object LDPCmd {
 	// type NamedGraph = (Uri, Rdf#Graph)
 	// type NamedGraphs = Map[Uri,Rdf#Graph]
+
+
+	type Script[A] = Free[LDPCmd,A]
 
 	/** 
 	 * some Metadata on the resource from the server.
@@ -36,8 +42,10 @@ object LDPCmd {
 	 * A response to a request.
 	 * The Metadata tells if the response succeeded, what the problems may have been, etc...
 	 * The content, is an attempted parse of the stream to the object type.
+	 * (todo?: generalise the type of the content to quite a lot more types, such
+	 * as DataSets, Images, streams, ...) 
 	 **/
-	case class Response[T](meta: Meta, content: Try[T])
+	case class Response(meta: Meta, content: Try[Rdf#Graph])
 
 	/** 
 	 * Get response from URL. 
@@ -51,7 +59,7 @@ object LDPCmd {
 	 * How far could one generalise that? Allow T to be a stream too? A DOM? Clearly the more generality one allows
 	 * the more the GET needs to specify restrictions on the return type.
 	**/
-	case class Get[T](url: Uri) extends LDPCmd[Response[T]]
+	case class Get[A](url: Uri, k: Response => A) extends LDPCmd[A]
 
 	/*
 	 * CoFree as as defined in [[http://tpolecat.github.io/presentations/cofree/slides#19 tpolecat's Fixpoint slides]].
@@ -102,7 +110,7 @@ object LDPCmd {
 		def foldRight[A, B](fa: GraF[A], lb: cats.Eval[B])(f: (A, cats.Eval[B]) => cats.Eval[B]): cats.Eval[B] = ???
 	
 
-	def get[T](key: Uri): LDPScript[Response[T]] = liftF[LDPCmd, Response[T]](Get[T](key))
+	def get(key: Uri): Script[Response] = liftF[LDPCmd, Response](Get[Response](key,identity))
 
 	/**
 	 * Build a Script to fetch owl:imports links starting from a graph at u, avoiding visted ones.
@@ -114,8 +122,8 @@ object LDPCmd {
 	 * todo: there is parallelism here when fetching children: would it work to use Applicatives?
 	 * todo: returning a Set may be better, but I had trouble getting Traverse to work on Set
 	 */
-	def fetchWithImports(u: Uri, visited: Set[Uri]=Set()) : LDPScript[ReqDataSet] = for {
-		gOpt <- get[Rdf#Graph](u)
+	def fetchWithImports(u: Uri, visited: Set[Uri]=Set()) : Script[ReqDataSet] = for {
+		gOpt <- get(u)
 		ngs: ReqDataSet <- gOpt match 
 			case Response(Meta(url, StatusCodes.OK, headers),Success(graph)) => 
 				import cats.syntax.all.toTraverseOps
@@ -123,7 +131,7 @@ object LDPCmd {
 				val newVisited = visited+u
 				val newImports = imports.filterNot(newVisited.contains(_))
 				val covered = newVisited ++ newImports
-				val lstOfScrpDs: List[LDPScript[ReqDataSet]] = newImports.map(u => fetchWithImports(u, covered))
+				val lstOfScrpDs: List[Script[ReqDataSet]] = newImports.map(u => fetchWithImports(u, covered))
 				lstOfScrpDs.sequence.map(subs => Cofree(Meta(u),Now(GraF(graph,subs.toList))))
 			case Response(meta,_) => //any other result is problematic for the moment. 
 			   //todo: pass more detailed error info into the result below - needed to explain problems
