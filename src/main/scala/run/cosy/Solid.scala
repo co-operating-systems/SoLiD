@@ -160,10 +160,13 @@ class Solid(
 	import scala.jdk.CollectionConverters.*
 	given timeout: Scheduler = sys.scheduler
 	given scheduler: Timeout = Timeout(5.second)
+	given reg: ResourceRegistry = registry
 
 	def fetchKeyId(keyIdUrl: Uri)(reqc: RequestContext): Future[SignatureVerifier[KeyIdAgent]] = {
 		import RouteResult.{Complete,Rejected}
-		import run.cosy.RDF.{given,_}, run.cosy.RDF.ops.{given,*}
+		import run.cosy.RDF.{given,_}
+		import run.cosy.RDF.ops.{given,_}
+
 		given ec: ExecutionContext = reqc.executionContext
 		val req = RdfParser.rdfRequest(keyIdUrl)
 		if keyIdUrl.isRelative then  //we get the resource locally
@@ -188,6 +191,7 @@ class Solid(
 			case Tuple1(None) => routeLdp()	
 		}
 	}
+	import run.cosy.ldp.SolidCmd
 
 	def routeLdp(agent: Agent = new Anonymous()): Route = (reqc: RequestContext) => {
 		val path = reqc.request.uri.path
@@ -196,9 +200,12 @@ class Solid(
 		val (remaining, actor): (List[String], ActorRef[LDP.Cmd]) = registry.getActorRef(path)
 			.getOrElse((List[String](), rootRef))
 
-		def cmdFn(ref: ActorRef[HttpResponse]): LDP.Cmd = remaining match
-			case Nil => LDP.WannaDo(agent, reqc.request, ref)
-			case head :: tail => LDP.RouteMsg(NonEmptyList.fromSeq(head,tail.toSeq), agent, reqc.request, ref)
+		def cmdFn(replyTo: ActorRef[HttpResponse]): LDP.Cmd = remaining match
+			case Nil => LDP.WannaDo(LDP.CmdMessage(SolidCmd.plain2(reqc.request), agent, replyTo))
+			case head :: tail => LDP.RouteMsg(
+				NonEmptyList.fromSeq(head,tail.toSeq), 
+				LDP.CmdMessage(SolidCmd.plain2(reqc.request), agent, replyTo)
+			)
 
 		actor.ask[HttpResponse](cmdFn).map(RouteResult.Complete(_))
 	}

@@ -2,8 +2,9 @@ package run.cosy.ldp
 
 import akka.actor.typed._
 import akka.actor.typed.scaladsl.Behaviors
-import akka.http.scaladsl.model.{HttpRequest, Uri}
+import akka.http.scaladsl.model.{HttpRequest, HttpResponse, Uri}
 import run.cosy.ldp.fs.BasicContainer
+import scalaz.NonEmptyList
 
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicReference
@@ -49,6 +50,8 @@ trait PathDB[T] {
 
 }
 
+import run.cosy.ldp.Messages._
+
 /**
  * Whenever an LDPR actor goes up it should register itself here,
  * so that messages can be routed directly to the right actor,
@@ -61,7 +64,11 @@ trait PathDB[T] {
  *
  * @param system not used at present
  */
-class ResourceRegistry(system: ActorSystem[_]) extends PathDB[ActorRef[Messages.Cmd]] with Extension
+class ResourceRegistry(system: ActorSystem[_]) extends PathDB[ActorRef[Messages.Route]] with Extension {
+	import akka.http.scaladsl.model.Uri
+	
+
+}
 
 
 object ResourceRegistry extends ExtensionId[ResourceRegistry] {

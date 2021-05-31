@@ -9,9 +9,8 @@ import akka.actor.typed.scaladsl
 import akka.http.scaladsl.model.HttpMethods.{GET, POST}
 import akka.http.scaladsl.model.Uri.Path
 import akka.http.scaladsl.model.{ContentTypes, HttpEntity, HttpRequest, MediaRange, MediaRanges, MediaTypes}
-import run.cosy.ldp.ResourceRegistry
+import run.cosy.ldp.{Messages, ResourceRegistry, SolidCmd}
 import run.cosy.ldp.fs.BasicContainer
-import run.cosy.ldp.Messages
 
 import java.nio.file.Files
 import org.scalatest.BeforeAndAfterAll
@@ -30,6 +29,7 @@ import scala.util.{Failure, Success}
 import akka.http.scaladsl.model.Uri
 import run.cosy.http.auth.WebServerAgent
 import run.cosy.ldp.testUtils.TmpDir
+import run.cosy.ldp.Messages.CmdMessage
 
 import java.nio.file
 import scalaz.NonEmptyList
@@ -61,16 +61,15 @@ class TestContainerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers
 		{
 			//create Hello
 			import _root_.run.cosy.http.Encoding.{given, *}
-			rootActr ! Messages.Do(
-				WebServerAgent,
+			rootActr ! Messages.Do(CmdMessage(SolidCmd.plain2(
 				HttpRequest(
 					POST,
 					rootUri.withPath(Uri.Path.SingleSlash),
 					Seq(Slug("Hello".asClean)),
 					HttpEntity(ContentTypes.`text/plain(UTF-8)`, "Hello World")
 				),
-				probe.ref
-			)
+			), WebServerAgent,probe.ref))
+
 			val HttpResponse(status, hdrs, response, protocol) = probe.receiveMessage()
 			assert(status == Created)
 			assert(hdrs.contains(Location(rootUri.withPath(Uri.Path.Empty / ("Hello")))))
@@ -80,13 +79,15 @@ class TestContainerSpec extends AnyFlatSpec with BeforeAndAfterAll with Matchers
 			// Read Hello
 			rootActr ! Messages.RouteMsg(
 				NonEmptyList("Hello"),
-				WebServerAgent,
+				CmdMessage(SolidCmd.plain2(
 				HttpRequest(
 					GET,
 					rootUri.withPath(Uri.Path / "Hello"),
 					Seq(Accept(MediaRanges.`*/*`))
-				), probe.ref
-			)
+				)),
+				WebServerAgent,
+				probe.ref
+			))
 			val HttpResponse(status, hdrs, response, protocol) = probe.receiveMessage()
 			assert(status == OK)
 		//	assert(hdrs.contains(Location(rootUri.withPath(Uri.Path.Empty / ("Hello.txt")))))

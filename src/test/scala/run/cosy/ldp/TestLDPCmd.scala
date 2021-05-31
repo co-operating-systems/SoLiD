@@ -11,7 +11,7 @@ import scala.util.Success
 
 class LDPCmdTst extends munit.FunSuite {
 	import run.cosy.ldp._
-	import run.cosy.ldp.LDPCmd._
+	import run.cosy.ldp.SolidCmd._
 	import scala.collection.immutable.Set
 	import RDF.{given,_}
 	import RDF.ops.{given,_}
@@ -85,8 +85,8 @@ class LDPCmdTst extends munit.FunSuite {
 	val server2 = server + (w3cu("/People/Berners-Lee/.acl") -> BLAcl2)
 
 	import akka.http.scaladsl.model.StatusCodes
-	def simpleCompiler(db: Map[Uri, Rdf#Graph]): LDPCmd ~> Id = new (LDPCmd ~> Id) {	
-		def apply[A](cmd: LDPCmd[A]): Id[A] =  cmd match 
+	def simpleCompiler(db: Map[Uri, Rdf#Graph]): SolidCmd ~> Id = new (SolidCmd ~> Id) {	
+		def apply[A](cmd: SolidCmd[A]): Id[A] =  cmd match 
 			case Get(url,f) => db.get(url) match 
 				case Some(g) => f(Response(Meta(url,StatusCodes.OK,Seq()),Success(g)))
 				//todo: Create an exception for this that can be re-used

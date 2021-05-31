@@ -6,63 +6,109 @@ import akka.http.scaladsl.model.headers._
 import akka.http.scaladsl.model._
 import akka.stream.Materializer
 import run.cosy.http.auth.Agent
+import run.cosy.ldp.SolidCmd
+import run.cosy.ldp.SolidCmd.{Get, Meta, Plain, ReqDataSet, Response, Script, Wait}
 import scalaz.{ICons, INil, NonEmptyList}
 import scalaz.NonEmptyList.nel
+import run.cosy.ldp.ResourceRegistry
 
 import java.nio.file.Path
 import scala.concurrent.ExecutionContext
+import scala.util.Failure
 
 object Messages {
 	sealed trait Cmd
 
 	//trait for a Cmd that is to be acted upon
 	sealed trait Act extends Cmd {
-		def msg: ReqMsg
+		def msg: CmdMessage[_]
 	}
 	sealed trait Route extends Cmd {
-		def msg: ReqMsg
+		def msg: CmdMessage[_]
 	}
 	sealed trait Info extends Cmd
 
-	sealed trait ReqMsg {
-		type Request
-		type Response
-		val req: Request
-		val from: Agent
-		val replyTo: ActorRef[Response]
-		def returnError(res: HttpResponse): Unit
-		def redirectTo(uri: Uri, msg: String): Unit
-		def uri: Uri
-	}
 
-	case class HttpReqMessage(req: HttpRequest, from: Agent, replyTo: ActorRef[HttpResponse]) extends ReqMsg {
-		type Request = HttpRequest
-		type Response = HttpResponse
-		def uri: Uri = req.uri
-		def returnError(res: HttpResponse): Unit = replyTo ! res
-		def redirectTo(redirectTo: Uri, msg: String): Unit = 
-			replyTo ! HttpResponse(MovedPermanently, Seq(Location(redirectTo)), msg)
-	}
+	//todo: ask for the whole URL not just the path, so that we can also be guided to proxy actor.
+	private
+	def send[A](msg: CmdMessage[A], uriPath: Uri.Path)(using reg: ResourceRegistry): Option[Unit] =
+		reg.getActorRef(uriPath).map { (remaining, sendTo) =>
+			sendTo ! { remaining match
+				case Nil => WannaDo(msg)
+				case head :: tail => RouteMsg(NonEmptyList.fromSeq(head, tail.toSeq), msg)
+			}
+		}
 
-	import LDPCmd.ReqDataSet
-	case class ScriptReqMessage[T](script: LDPCmd.LDPScript[T], from: Agent, replyTo: ActorRef[T]) extends ReqMsg {
-		type Request = LDPCmd.LDPScript[T]
-		type Response = T
-		def uri: Uri = script.resume match 
-			case Left(cmd) => ???
-			case Right(nextScr) => ???
+	/**
+	 * CmdMessage wraps an LDPCmd that is part of a Free Monad Stack. 
+	 * Ie. the `command` is the result of an LDPCmd.Script[T].resume
+	 * todo: use [[https://dotty.epfl.ch/docs/reference/other-new-features/type-test.html Dotty TypeTest]] to work with generics?
+	 */ 
+	case class CmdMessage[R](
+		commands: SolidCmd[Script[R]], from: Agent, replyTo: ActorRef[R]
+	)(using val reg: ResourceRegistry, val mat: Materializer,
+		val ec: ExecutionContext, val fscm: cats.Functor[SolidCmd]
+	){
+		def target: Uri = commands.url
+		
+		def continue(x: Script[R]): Unit =  x.resume match
+			case Right(answer) => replyTo ! answer
+			case Left(next) =>
+				val c: CmdMessage[R] = CmdMessage[R](next, from, replyTo)
+				send(c, next.url.path)
 
-		def returnError(res: HttpResponse): Unit = 
-			??? //todo: what should an error do? Should it apply the HttpResponse as error to the cmd?
-		def redirectTo(uri: Uri, msg: String): Unit
+      /**
+		 * If this is a Plain Http Request then all responses can go through here.
+		 * Otherwise, this actually indicates an error, since the constructed object
+		 * is not returned.
+		 * This smells like we have a type problem here
+		 **/
+		def respondWith(res: HttpResponse): Unit =
+			commands match
+			case Plain(req,k) => continue(k(res))
+			case g@Get(u,k) =>
+				val x: Script[R] = k(Response(
+					Meta(g.url,res.status,res.headers),
+					Failure(Exception("what should I put here?"))
+				))
+				continue(x)
+			case Wait(f,k) => ??? // not sure what to do here!
+
+		/**
+		 * Here we redirect the message to the new resource.
+		 * BUT!
+		 *	todo: should the redirect be implemented automatically, or be something for the monad construction layer?
+		 *	   The latter would be a lot more flexible, and would also work better with remote resources over a proxy.
+		 */
+		def redirectTo(to: Uri, msg: String): Unit = respondWith(
+			HttpResponse(StatusCodes.MovedPermanently,
+				Seq(Location(to)))
+			)
 	}
 
 	/**
+	 * ScriptMsg don't yet know where they want to go, as that requires the
+	 * script to be first `continue`ed, in order to find the target.
+	 * Note: calling continue on the script can result in an answer to be returned
+	 * to the replyTo destination!
+	 **/
+	case class ScriptMsg[R](
+		script: Script[R], from: Agent, replyTo: ActorRef[R]
+	)(using val reg: ResourceRegistry, val mat: Materializer,
+		val ec: ExecutionContext, val fscm: cats.Functor[SolidCmd]
+	) extends Cmd {
+		//todo: this code duplicates method from CmdMessage
+		def continue: Unit =  script.resume match
+			case Right(answer) => replyTo ! answer
+			case Left(next) =>
+				val c: CmdMessage[R] = CmdMessage[R](next, from, replyTo)
+				send(c, next.url.path)
+	}
+
+
+	/**
 	 * @param path the path to the final resource */
-	final case class RouteMsg(
-		path: NonEmptyList[String],
-		msg: ReqMsg
-	)(using val mat: Materializer, val ec: ExecutionContext) extends Route {
+	final case class RouteMsg(path: NonEmptyList[String], msg: CmdMessage[_]) extends Route {
 		def name: String = path.head
 
 		// check that path is not empty before calling  (anti-pattern)
@@ -72,14 +118,10 @@ object Messages {
 	}
 
 	/** a command to be executed on the resource on which it arrives, after being authorized */
-	final case class Do(
-		msg: ReqMsg
-	)(using val mat: Materializer, val ec: ExecutionContext) extends Act
+	final case class Do(msg: CmdMessage[_]) extends Act with Route
 
 	/** message has arrived, but still needs to be authorized */
-	final case class WannaDo(
-		 msg: ReqMsg
-	)(using val mat: Materializer, val ec: ExecutionContext) extends Route {
+	final case class WannaDo(msg: CmdMessage[_]) extends Route {
 		def toDo = Do(msg)
 	}
 	
