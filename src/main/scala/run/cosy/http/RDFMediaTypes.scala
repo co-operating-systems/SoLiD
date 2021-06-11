@@ -121,5 +121,9 @@ object RDFMediaTypes {
 		`application/sparql-results+json`, `application/sparql-results+xml`, `application/trix`
 	)
 
+	object RDFData {
+		def unapply(mr: MediaRange): Option[MediaType] = rdfData.find(mt => mr.matches(mt))
+	}
+
 
 }

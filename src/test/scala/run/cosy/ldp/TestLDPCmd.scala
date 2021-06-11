@@ -22,17 +22,6 @@ class LDPCmdTst extends munit.FunSuite {
 
 	import cats.implicits._
 
-	import org.w3.banana.binder.ToNode
-	import org.w3.banana.binder.ToNode.{given,_}
-
-	//see https://github.com/lampepfl/dotty/discussions/12527
-	implicit def URIToNode: ToNode[Rdf,Rdf#URI] = new ToNode[Rdf, Rdf#URI] {
-		def toNode(t: Rdf#URI): Rdf#Node = t
-	}
-	implicit def BNodeToNode: ToNode[Rdf,Rdf#BNode] = new ToNode[Rdf, Rdf#BNode] {
-		def toNode(t: Rdf#BNode): Rdf#Node = t
-	}
-
 	def w3cu(u: String): Uri = Uri("https://w3.org").withPath(Uri.Path(u))
 
 	def w3c(pg: org.w3.banana.PointedGraph[Rdf]): Rdf#Graph = pg.graph.resolveAgainst(URI("https://w3.org"))
@@ -105,11 +94,11 @@ class LDPCmdTst extends munit.FunSuite {
 		val ds: ReqDataSet = fetchWithImports(w3cu("/People/Berners-Lee/card.acl")).foldMap(simpleCompiler(server))
 
 		//count the graphs in ds
-		def countGr(ds: ReqDataSet): Eval[Int] = Cofree.cata[GraF,Meta,Int](ds){(meta, ds) => cats.Now( 1 + ds.other.fold(0)(_+_)) }
+		def countGr(ds: ReqDataSet): Eval[Int] = Cofree.cata[GraF,Meta,Int](ds){(meta, d) => cats.Now( 1 + d.other.fold(0)(_+_)) }
 		assertEquals(countGr(ds).value,3)
 
 		//return the top NamedGraph of the dataset
-		def toNG(ds: ReqDataSet): Eval[(Uri,Rdf#Graph)] = Now(ds.head.url -> ds.tail.value.default)
+		def toNG(ds: ReqDataSet): Eval[(Uri,Rdf#Graph)] = Now(ds.head.url -> ds.tail.value.graph)
 
 		
 		//check that the output is the same as the full info on the server

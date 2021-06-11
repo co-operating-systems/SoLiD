@@ -20,6 +20,18 @@ object RDF {
 
 	extension (rdfUri: Rdf#URI)
 		def toAkka: Uri = Uri(ops.getString(rdfUri))
+		
+	import org.w3.banana.binder.ToNode
+	import org.w3.banana.binder.ToNode.{given,_}
+
+	// todo: add this to banana
+	//see https://github.com/lampepfl/dotty/discussions/12527
+	implicit def URIToNode: ToNode[Rdf,Rdf#URI] = new ToNode[Rdf, Rdf#URI] {
+		def toNode(t: Rdf#URI): Rdf#Node = t
+	}
+	implicit def BNodeToNode: ToNode[Rdf,Rdf#BNode] = new ToNode[Rdf, Rdf#BNode] {
+		def toNode(t: Rdf#BNode): Rdf#Node = t
+	}
 
 }
 

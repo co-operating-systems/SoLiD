@@ -72,7 +72,7 @@ object Messages {
 					Failure(Exception("what should I put here?"))
 				))
 				continue(x)
-			case Wait(f,k) => ??? // not sure what to do here!
+			case Wait(f,u, k) => ??? // not sure what to do here!
 
 		/**
 		 * Here we redirect the message to the new resource.
@@ -107,12 +107,12 @@ object Messages {
 
 
 	/**
-	 * @param path the path to the final resource */
-	final case class RouteMsg(path: NonEmptyList[String], msg: CmdMessage[_]) extends Route {
-		def name: String = path.head
+	 * @param remainingPath the path to the final resource */
+	final case class RouteMsg(remainingPath: NonEmptyList[String], msg: CmdMessage[_]) extends Route {
+		def nextSegment: String = remainingPath.head
 
 		// check that path is not empty before calling  (anti-pattern)
-		def next: Route = path match
+		def nextRoute: Route = remainingPath match
 			case NonEmptyList(_, INil()) => WannaDo(msg)
 			case NonEmptyList(_, ICons(h,tail)) => RouteMsg(nel(h,tail), msg)
 	}

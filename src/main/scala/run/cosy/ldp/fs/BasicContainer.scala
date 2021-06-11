@@ -37,6 +37,7 @@ import scalaz.{ICons, INil, NonEmptyList}
 
 import scala.collection.immutable.HashMap
 import scala.util.Random
+import _root_.run.cosy.http.util._
 
 /**
  * An LDP/Solid Container corresponding to a directory on the FileSystem.
@@ -275,13 +276,14 @@ class BasicContainer private(
 )(using reg: ResourceRegistry) {
 	import akka.http.scaladsl.model.HttpCharsets.`UTF-8`
 	import akka.http.scaladsl.model.MediaTypes.{`text/plain`, `text/x-java-source`}
-	import akka.http.scaladsl.model.headers.{Link, LinkParams, LinkValue, Location, `Content-Type`}
+	import akka.http.scaladsl.model.headers.{`Content-Type`, Link, LinkParams, LinkValue, Location}
 	import akka.http.scaladsl.model.{ContentTypes, HttpCharsets, HttpEntity, HttpMethods}
 	import BasicContainer._
 	import run.cosy.ldp.Messages._
-	import run.cosy.ldp.SolidCmd.{Get,Plain,Wait,Script}
-	import run.cosy.ldp.fs.{Ref,CRef,RRef}
-	import run.cosy.ldp.fs.Attributes.{Attributes, Archived, OtherAtt, ActorFileAttr, Other}
+	import run.cosy.ldp.SolidCmd.{Get, Plain, Script, Wait}
+	import run.cosy.ldp.fs.{CRef, Ref, RRef}
+	import run.cosy.ldp.fs.ActorResource
+	import run.cosy.ldp.fs.Attributes.{Archived, Other, OtherAtt}
 
 	import java.nio.file.attribute.BasicFileAttributes
 	import java.time.Instant
@@ -382,48 +384,52 @@ class BasicContainer private(
 		 **/
 //		def createACL(defaults: Rdf#Graph): Boolean = true
 
-		lazy val start: Behavior[AcceptMsg] = {
+		lazy val start: Behavior[AcceptMsg] =
 			Behaviors.receiveMessage[AcceptMsg] { (msg: AcceptMsg) =>
+				context.log.info(s"received in ${containerUrl.path} message $msg")
 				import BasicContainer.PostCreation
 				msg match
-					case wd: WannaDo => Authorize(wd)
-					case script: ScriptMsg[_] =>
-						import script.given
-						script.continue
+				case wd: WannaDo =>
+					Authorize(wd)
+					Behaviors.same
+				case script: ScriptMsg[_] =>
+					import script.given
+					script.continue
+					Behaviors.same
+				case Do(cmdmsg @ CmdMessage(cmd,agent,replyTo)) =>
+					context.log.info(s"received $cmd from $agent")
+					import cmdmsg.given
+					cmd match
+					case p @ Plain(_,_) =>
+						run(p, agent, replyTo)
+					case Get(url,k) =>
+						//1. todo: check if we have cached version, if so continue with that
+						//2. if not, build it from result of plain HTTP request
+						import cats.free.Free
+						import _root_.run.cosy.RDF.{given,_}
+						//todo: we should not have to call resume here as we set everything up for plain
+						SolidCmd.getFromPlain(url, k).resume match
+							case Left(plain @ Plain(req,k)) => run(plain, agent, replyTo)
+							case _ => ???
+					case Wait(future,u,k) =>
+						//it is difficult to see why a Wait would be sent somewhere,...
+						// but what is sure is that if it is, then this seems the only reasonable thing to do:
+						context.context.pipeToSelf(future){tryVal => ScriptMsg(k(tryVal),agent,replyTo) }
 						Behaviors.same
-					case Do(cmdmsg @ CmdMessage(cmd,agent,replyTo)) =>
-						import cmdmsg.given
-						cmd match
-						case p @ Plain(_,_) =>
-							run(p, agent, replyTo)
-						case Get(url,k) =>
-							//1. todo: check if we have cached version, if so continue with that
-							//2. if not, build it from result of plain HTTP request
-							import cats.free.Free
-							import _root_.run.cosy.RDF.{given,_}
-							//todo: we should not have to call resume here as we set everything up for plain
-							SolidCmd.getFromPlain(url, k).resume match
-								case Left(plain @ Plain(req,k)) => run(plain, agent, replyTo)
-								case _ => ???
-						case Wait(future,k) =>
-							//it is difficult to see why a Wait would be sent somewhere,...
-							// but what is sure is that if it is, then this seems the only reasonable thing to do:
-							context.context.pipeToSelf(future){tryVal => ScriptMsg(k(tryVal),agent,replyTo) }
-							Behaviors.same
-					case create: PostCreation =>
-						//place to do things on container creation
-						//should ACL rules be set up here, or on startup? What else can be done on creation?
+				case create: PostCreation =>
+					//place to do things on container creation
+					//should ACL rules be set up here, or on startup? What else can be done on creation?
 //						createACL(null)
-						//reply that done
-						create.cmd.respondWith(HttpResponse(
-							Created,
-							Location(containerUrl.withPath(containerUrl.path / ""))::LinkHeaders::AllowHeader::Nil
-						))
-						Behaviors.same
-					case routeMsg: RouteMsg => routeHttpReq(routeMsg)
-					case ChildTerminated(name) =>
-						reg.removePath(containerUrl.path / name)
-						new Dir(contains - name,counters).start
+					//reply that done
+					create.cmd.respondWith(HttpResponse(
+						Created,
+						Location(containerUrl.withPath(containerUrl.path / ""))::LinkHeaders::AllowHeader::Nil
+					))
+					Behaviors.same
+				case routeMsg: RouteMsg => routeHttpReq(routeMsg)
+				case ChildTerminated(name) =>
+					reg.removePath(containerUrl.path / name)
+					new Dir(contains - name,counters).start
 			}.receiveSignal {
 				case (_, signal) if signal == PreRestart || signal == PostStop =>
 					counters.foreach { (name, int) =>
@@ -431,7 +437,6 @@ class BasicContainer private(
 					}
 					Behaviors.same
 			}
-		}
 
 		/**
 		 * Get Ref for name by checking in cache, and if not on the FS. It does not create an actor for the Ref.
@@ -447,7 +452,7 @@ class BasicContainer private(
 			contains.get(name).map { (v : Ref|Other)  =>
 				v match
 				case ref: Ref => (ref, Dir.this)
-				case fa: ActorFileAttr  =>
+				case fa: ActorResource  =>
 					val r = context.spawn(fa,urlFor(name))
 					(r, new Dir(contains + (name -> r), counters))
 				case ar: Other => (ar, Dir.this)
@@ -458,7 +463,7 @@ class BasicContainer private(
 				val path = dirPath.resolve(name)  //todo: also can throw exception
 				context.log.info(s"resolved <$dirPath>.resolve($name)=$path")
 				Attributes.forPath(path) match
-					case Success(att: ActorFileAttr) =>
+					case Success(att: ActorResource) =>
 						val r: Ref = context.spawn(att,urlFor(name))
 						Some((r, new Dir(contains + (name -> r), counters)))
 					case Success(aro : Other) =>
@@ -569,7 +574,7 @@ class BasicContainer private(
 			//Here I just rebuild the CmdMessage, for convenience
 			//todo: see above
 			val pcmd: CmdMessage[T] = CmdMessage[T](plainCmd, agent, replyTo)
-			if (!uri.path.endsWithSlash)
+			if !uri.path.endsWithSlash then
 				//this should have been dealt with by parent container, which should have tried conneg.
 				val ldpcUri = uri.withPath(uri.path / "")
 				pcmd.respondWith(HttpResponse(
@@ -668,21 +673,20 @@ class BasicContainer private(
 //		}
 
 		protected
-		def routeHttpReq(msg: RouteMsg): Behavior[AcceptMsg] = {
-			msg.next match
-				case doit: WannaDo =>
-					if doit.msg.target.path.endsWithSlash then
-						forwardToContainer(msg.name, msg)
-					else forwardMsgToResourceActor(msg.name, doit)
-				case route: RouteMsg => forwardToContainer(msg.name, route)
-		}
+		def routeHttpReq(msg: RouteMsg): Behavior[AcceptMsg] =
+			msg.nextRoute match
+			case doit @ WannaDo(_) =>
+				doit.msg.target.fileName match {
+					case None  => forwardToContainer(msg.nextSegment, doit)
+					case Some(s) if s(0) == '.' => forwardToContainer(msg.nextSegment, doit)
+					case _ => forwardMsgToResourceActor(msg.nextSegment, doit)
+				}
+			case route: RouteMsg => forwardToContainer(msg.nextSegment, route)
 
-		//todo: do we need a name cleanup happen? Perhaps we don't need that for containers?
-		//  but getRef can also return a RRef... So `cat.jpg`
-		//  here would return a `cat.jpg` RRef rather than `cat` or a `CRef`
-		//  this indicates that the path name must be set after checking the attributes!
+
 		def forwardToContainer(name: String, route: Route): Behavior[AcceptMsg] = {
-			if name.contains('.') then
+			context.log.info(s"in forwardToContainer($name, $route)")
+			if name.indexOf('.') > 0 then
 				route.msg.respondWith(HttpResponse(NotFound,
 					entity=HttpEntity("This Solid server serves no resources with a '.' char in path segments (except for the last `file` segment).")))
 				Behaviors.same
@@ -690,10 +694,20 @@ class BasicContainer private(
 				case Some(x, dir) =>
 					x match
 					case CRef(att, actor) => actor ! route
+					case SMRef(att, actor) => //server managed resource, this is not a Container, but is "owned" by this container.
+						context.log.info(s"we have a Server Managed Resource SMRef($att, $actor)")
+						route match
+						case wd : WannaDo =>  //we pass on to the server managed actor
+							context.log.info(s"We are dispatching SMRef to $actor")
+							actor ! wd
+						case RouteMsg(path, reqmsg) => // the path passes through a file, so it must end here
+							context.log.error("We should never arrive at this point!! Look at how we got here")
+							reqmsg.respondWith(HttpResponse(InternalServerError, Seq(),
+								s"Resource with URI ${reqmsg.target} does not exist"))
 					case RRef(att, actor) => // there is no container, so redirect to resource
 						route match
 						case WannaDo(cmd) =>  //we're at the path end, so we can redirect
-							val redirectTo = cmd.target.withPath(cmd.target.path.reverse.tail.reverse)
+							val redirectTo = cmd.target.withoutSlash
 							route.msg.redirectTo(redirectTo,"There is no container here. we will redirect to the resource")
 						case RouteMsg(path, reqmsg) => // the path passes through a file, so it must end here
 							reqmsg.respondWith(HttpResponse(NotFound, Seq(), s"Resource with URI ${reqmsg.target} does not exist"))
@@ -716,6 +730,7 @@ class BasicContainer private(
 		 */
 		protected
 		def forwardMsgToResourceActor(name: String, wannaDo: WannaDo): Behavior[AcceptMsg] =
+			context.log.info(s"in  forwardMsgToResourceActor($name, $wannaDo")
 			val dotLessName = actorNameFor(name)
 			getRef(dotLessName) match
 			case Some(x,dir) =>
@@ -728,6 +743,9 @@ class BasicContainer private(
 						else HttpResponse(NotFound)
 					}
 				case RRef(_, actor) => actor ! wannaDo
+				case SMRef(att, actor) => //server managed resource, this is not a Container, but is "owned" by this container.
+					context.log.info(s"we have a Server Managed Resource SMRef($att, $actor)")
+					actor ! wannaDo
 				case _: Archived => wannaDo.msg.respondWith(HttpResponse(Gone))
 				case _: OtherAtt => wannaDo.msg.respondWith(HttpResponse(NotFound))
 				dir.start
@@ -741,13 +759,15 @@ class BasicContainer private(
 		/**
 		 * Given a request for resource `name` find out what its root is. 
 		 * We will just take the name to be everything up to the first dot (`.`) - to be made
-		 * more flexible later.
+		 * more flexible later. (an initial dot, does not count)
 		 * This makes a lot of decisions here much simpler.
 		 * This would make PUT to create new resources very brittle unless the server
 		 * can tell the client what the restrictions are.
 		 * */
-		def actorNameFor(resourceName: String): String = resourceName.takeWhile(_ != '.')
-
+		def actorNameFor(resourceName: String): String =
+			if resourceName.size > 1 then
+				resourceName(0) + resourceName.substring(1).takeWhile(_ != '.')
+			else resourceName
 	}
 
 }

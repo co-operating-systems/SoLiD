@@ -82,7 +82,7 @@ object Dependencies {
 		//		"eu.timepit" %% "refined-cats"            % refinedVersion // optional
 		//	).map(_.exclude("org.scala-lang.modules","scala-xml_2.13"))
 
-		def allCompatibleLibs = (Seq(scalaz, alpakka) ++ akka ++ akkaTest ++ banana)
+		def allCompatibleLibs = (Seq(alpakka) ++ akka ++ akkaTest ++ banana)
 			.map(o => o cross CrossVersion.for3Use2_13)
 	}
 

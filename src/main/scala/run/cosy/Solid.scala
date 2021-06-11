@@ -20,6 +20,7 @@ import akka.util.Timeout
 import com.typesafe.config.{Config, ConfigFactory}
 import org.w3.banana.PointedGraph
 import run.cosy.http.{IResponse, RDFMediaTypes, RdfParser}
+import run.cosy.http.util._
 import run.cosy.http.auth.{Agent, Anonymous, SignatureVerifier, KeyIdAgent, WebServerAgent}
 import run.cosy.ldp.ResourceRegistry
 import run.cosy.ldp.{Messages => LDP}
@@ -48,8 +49,7 @@ object Solid {
 			import run.cosy.ldp.fs.BasicContainer
 			given system: ActorSystem[Nothing] = ctx.system
 			given reg : ResourceRegistry = ResourceRegistry(ctx.system)
-			val withoutSlash = uri.withPath(uri.path.reverse.dropChars(1).reverse)
-			val rootRef: ActorRef[LDP.Cmd] = ctx.spawn(BasicContainer(withoutSlash, fpath), "solid")
+			val rootRef: ActorRef[LDP.Cmd] = ctx.spawn(BasicContainer(uri.withoutSlash, fpath), "solid")
 			val registry = ResourceRegistry(system)
 			val solid = new Solid(uri, fpath, registry, rootRef)
 			given timeout: Scheduler = system.scheduler
@@ -199,15 +199,14 @@ class Solid(
 		reqc.log.info("routing req " + reqc.request.uri)
 		val (remaining, actor): (List[String], ActorRef[LDP.Cmd]) = registry.getActorRef(path)
 			.getOrElse((List[String](), rootRef))
+		reqc.log.info(s"($remaining, $actor) = registry.getActorRef($path)")
 
-		def cmdFn(replyTo: ActorRef[HttpResponse]): LDP.Cmd = remaining match
-			case Nil => LDP.WannaDo(LDP.CmdMessage(SolidCmd.plain2(reqc.request), agent, replyTo))
-			case head :: tail => LDP.RouteMsg(
-				NonEmptyList.fromSeq(head,tail.toSeq), 
+		def routeWith(replyTo: ActorRef[HttpResponse]): LDP.Cmd = LDP.RouteMsg(
+				NonEmptyList.fromSeq("/",remaining.toSeq),
 				LDP.CmdMessage(SolidCmd.plain2(reqc.request), agent, replyTo)
-			)
+			).nextRoute
 
-		actor.ask[HttpResponse](cmdFn).map(RouteResult.Complete(_))
+		actor.ask[HttpResponse](routeWith).map(RouteResult.Complete(_))
 	}
 
 

@@ -1,0 +1,31 @@
+package run.cosy.http.util
+
+import run.cosy.http.util._
+import akka.http.scaladsl.model.Uri
+
+class UriUtilTest extends munit.FunSuite {
+
+
+	val card = Uri("https://bblfish.net/people/henry/card.ttl#me")
+	val bbl = Uri("https://bblfish.net")
+	val bblRt = Uri("https://bblfish.net/")
+
+	test("uri.filename") {
+		assertEquals(card.fileName,Some("card.ttl"))
+		assertEquals(bbl.fileName,None)
+		assertEquals(bblRt.fileName,None)
+	}
+
+	test("uri.withoutSlash") {
+		assertEquals(card.withoutSlash,card)
+		assertEquals(bbl.withoutSlash,bbl)
+		assertEquals(bblRt.withoutSlash,bbl)
+	}
+
+	test("uri.sibling(bro)") {
+		assertEquals(card.sibling("card"),Uri("https://bblfish.net/people/henry/card#me"))
+		assertEquals(bbl.sibling("card"),Uri("https://bblfish.net/card"))
+		assertEquals(bblRt.sibling("card"),Uri("https://bblfish.net/card"))
+	}
+
+}

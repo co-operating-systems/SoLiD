@@ -50,7 +50,8 @@ object SolidCmd {
 	def get(key: Uri): Script[Response] = liftF[SolidCmd, Response](Get[Response](key,identity))
 
 	/**
-	 *
+	 * Build a script that will start by fetching `url`, unmarshall the result into an `Rdf#Graph` inside a Response
+	 * and apply the continuation `k` to that Response.
 	 * @param url to GET
 	 * @param k the contination to use once the Response is available
 	 * @tparam A
@@ -70,10 +71,10 @@ object SolidCmd {
 					val fgres: Future[Response] = fg.map { ir =>
 						Response(Meta(ir.origin, ir.status, ir.headers), Success(ir.content))
 					}
-					SolidCmd.wait[Response](fgres)
+					SolidCmd.wait[Response](fgres, url)
 				case other =>
 					SolidCmd.wait[Response](Future.failed(
-						new Throwable("could not parse graph. todo: better error message")))
+						new Throwable("could not parse graph. todo: better error message")),url)
 			x <- k(tryResp.getOrElse(
 				Response(Meta(url, StatusCodes.InternalServerError), Failure(new Throwable("todo")))
 			))
@@ -95,19 +96,18 @@ object SolidCmd {
 	def plain2(req: HttpRequest): SolidCmd[Script[HttpResponse]] = Plain(req, Free.pure[SolidCmd,HttpResponse])
 
 	/** Wait that a future has a result. In terms of actors this can use the pipeToSelf command */
-	case class Wait[A,B](ftr: Future[A], k: Try[A] => B) extends SolidCmd[B]:
+	case class Wait[A,B](ftr: Future[A], url: Uri, k: Try[A] => B) extends SolidCmd[B]
 		//todo: The Wait does not have a URL to send it to (or does it always send it to the same actor?)
-		def url: Uri = null
 
-	def wait[A](ftr: Future[A]): Script[Try[A]] =
-		liftF[SolidCmd, Try[A]](Wait(ftr,identity))
+	def wait[A](ftr: Future[A], target: Uri): Script[Try[A]] =
+		liftF[SolidCmd, Try[A]](Wait(ftr,target,identity))
 
 	given CmdFunctor: cats.Functor[SolidCmd] with
 		def map[A, B](fa: SolidCmd[A])(f: A => B): SolidCmd[B] = fa match
 			//todo: k andThen can lead to stackoverflow. Look at cats.Coyoneda which uses Function.chain
 			case Get(url,k) => Get(url, k andThen f)
 			case Plain(req,k) => Plain(req, k andThen f)
-			case Wait(ftr,k) => Wait(ftr, k andThen f)
+			case Wait(ftr, url, k) => Wait(ftr, url, k andThen f)
 
 
 	/**
@@ -141,7 +141,7 @@ object SolidCmd {
 	 * a HashMap, a Graph?
 	 * todo: We use List here, as I can't figure out how to get CommutativeTraverse to Work for Set
 	 **/
-	case class GraF[A](default: Rdf#Graph, other: List[A]=List())
+	case class GraF[A](graph: Rdf#Graph, other: List[A]=List())
 
 	/**
 	 * A recursively defined DataSet where the first layer points to a Cofree graph with no
@@ -152,12 +152,19 @@ object SolidCmd {
 	 *  - the metadata is Http structured, whereas in RDF1.1 DS these are just URIs or bnodes
 	 *  - this structure does not say anything about sharing of blank nodes
 	 *
+	 *  Example
+	 *  GraF(ttl"<> a TeaPot.",
+	 *        Set(Cofree(Meta(Uri("/People/.acl"),
+	 *                   GraF(ttl"<> a Kettle.", Set())))
 	 */
 	type RDataSet = GraF[Cofree[GraF,Meta]]
 
 	/**
 	 * MetaData on a Request for a DataSet
 	 * eg Cofree(Meta(Uri("/.acl"),GraF(ttl"<> a TeaPot.", Set( ... other datasets ...))))
+	 * Actually this is badly named. What RDF understands as a DataSet is
+	 * closer to the type returned by tailForced namely the above defined
+	 * type RDataSet = GraF[Cofree[GraF, Meta]]
 	 */
 	type ReqDataSet = Cofree[GraF, Meta]
 	import cats.{Applicative,CommutativeApplicative, Eval,Traverse}
@@ -185,8 +192,8 @@ object SolidCmd {
 	 * todo: returning a Set may be better, but I had trouble getting Traverse to work on Set
 	 */
 	def fetchWithImports(u: Uri, visited: Set[Uri]=Set()) : Script[ReqDataSet] = for {
-		gOpt <- get(u)
-		ngs: ReqDataSet <- gOpt match
+		response <- get(u)
+		ngs: ReqDataSet <- response match
 			case Response(Meta(url, StatusCodes.OK, headers),Success(graph)) =>
 				import cats.syntax.all.toTraverseOps
 				val imports: List[Uri] = find(graph, ANY, owl.imports, ANY).toList.collect{ case Triple(_,_,o: Rdf#URI) => o.toAkka }
@@ -199,6 +206,8 @@ object SolidCmd {
 			   //todo: pass more detailed error info into the result below - needed to explain problems
 				cats.free.Free.pure[SolidCmd,ReqDataSet](Cofree(meta, Now(GraF(Graph.empty,Nil))))
 	} yield ngs
+
+
 	
 }
 
