@@ -1,6 +1,6 @@
 package run.cosy.http.util
 
-import run.cosy.http.util._
+import run.cosy.http.util.UriX.*
 import akka.http.scaladsl.model.Uri
 
 class UriUtilTest extends munit.FunSuite {
@@ -26,6 +26,12 @@ class UriUtilTest extends munit.FunSuite {
 		assertEquals(card.sibling("card"),Uri("https://bblfish.net/people/henry/card#me"))
 		assertEquals(bbl.sibling("card"),Uri("https://bblfish.net/card"))
 		assertEquals(bblRt.sibling("card"),Uri("https://bblfish.net/card"))
+	}
+
+	test("uri.ancestorOf(...)") {
+		assert(bbl.ancestorOf(bbl))
+		assert(bbl.ancestorOf(card))
+		assert(bblRt.ancestorOf(card))
 	}
 
 }

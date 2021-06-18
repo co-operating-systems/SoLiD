@@ -1,10 +1,15 @@
 package run.cosy.ldp
 
 import run.cosy.RDF
-import akka.http.scaladsl.model._
+import akka.http.scaladsl.model.*
+
 import scala.collection.immutable.HashMap
 import org.apache.jena.riot.lang.RiotParsers
 import cats.free.Cofree
+
+import java.util.concurrent.TimeUnit
+import scala.concurrent.Await
+import scala.concurrent.duration.Duration
 import scala.util.Failure
 import scala.util.Success
 // import org.w3.banana.{PointedGraph=>PG}
@@ -74,12 +79,16 @@ class LDPCmdTst extends munit.FunSuite {
 	val server2 = server + (w3cu("/People/Berners-Lee/.acl") -> BLAcl2)
 
 	import akka.http.scaladsl.model.StatusCodes
+	given ec : scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
 	def simpleCompiler(db: Map[Uri, Rdf#Graph]): SolidCmd ~> Id = new (SolidCmd ~> Id) {	
 		def apply[A](cmd: SolidCmd[A]): Id[A] =  cmd match 
 			case Get(url,f) => db.get(url) match 
 				case Some(g) => f(Response(Meta(url,StatusCodes.OK,Seq()),Success(g)))
 				//todo: Create an exception for this that can be re-used
 				case None => f(Response(Meta(url,StatusCodes.NotFound,Seq()),Failure(new Exception("no content"))))
+			case Plain(_, _) => ??? //todo: built up an example with Plain contents
+			case Wait(future, uri, k) =>
+				Await.result(future.transform(atry => Success(k(atry))), Duration(20,TimeUnit.SECONDS))
 	}
 
 	import cats.{Applicative,CommutativeApplicative, Eval}
@@ -94,7 +103,8 @@ class LDPCmdTst extends munit.FunSuite {
 		val ds: ReqDataSet = fetchWithImports(w3cu("/People/Berners-Lee/card.acl")).foldMap(simpleCompiler(server))
 
 		//count the graphs in ds
-		def countGr(ds: ReqDataSet): Eval[Int] = Cofree.cata[GraF,Meta,Int](ds){(meta, d) => cats.Now( 1 + d.other.fold(0)(_+_)) }
+		def countGr(ds: ReqDataSet): Eval[Int] = Cofree.cata[GraF,Meta,Int](ds){(meta, d) =>
+			cats.Now( 1 + d.other.fold(0)(_+_)) }
 		assertEquals(countGr(ds).value,3)
 
 		//return the top NamedGraph of the dataset
@@ -119,7 +129,10 @@ class LDPCmdTst extends munit.FunSuite {
 		//  <https://w3.org/People/Berners-Lee/.acl> 
 		// The nesting of Graphs makes sense if say the request were fetched via a certain agent (a proxy perhaps). 
 		// In that case nested graph metadata would really need to include Agent information.
-		val urlTree = ds2.mapBranchingS(new (GraF ~> List) { def apply[A](gr: GraF[A]): List[A]  = gr.other }).map(_.url).forceAll
+		val urlTree = ds2.mapBranchingS(new (GraF ~> List) { 
+			def apply[A](gr: GraF[A]): List[A]  = gr.other 
+		}).map(_.url).forceAll
+		
 		assertEquals(urlTree, 
 				Cofree(Uri("https://w3.org/People/Berners-Lee/card.acl"),
 					Now(List(Cofree(Uri("https://w3.org/People/Berners-Lee/.acl"),

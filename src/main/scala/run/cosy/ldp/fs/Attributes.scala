@@ -5,18 +5,23 @@ import java.nio.file.attribute.BasicFileAttributes
 import java.time.Instant
 import scala.util.Try
 
-sealed trait ActorResource(val path: Path)
-
 /**
- * @tparam name        local name of the resource in the directory
- * @tparam att         proof of existence, in the form of file attributes
- * @tparam collectedAt instant in time the file attributes were collected at - important to keep freshness info
+ *  @param path path of resource in the directory (is not proof that it exists)
+ *              which may be associated with an actor. 
  */
-sealed trait Attributes(att: BasicFileAttributes, collectedAt: Instant) extends ActorResource
+sealed trait APath(val path: Path)
+
+/** Paths that have potentially associated actors */
+sealed trait ActorPath extends APath
+/**
+ * @param att         proof of existence, in the form of file attributes
+ * @param collectedAt instant in time the file attributes were collected at - important to keep freshness info
+ */
+sealed trait Attributes(att: BasicFileAttributes, collectedAt: Instant)
 
 object Attributes {
 	//todo: currently we use attributes to generate the type, but arguably, when we create an object, we don't
-	//     need attributes, or even verifying where the link points to since we just created it. 
+	//     need attributes, or even verifying where the link points to since we just created it.
 	//     So we could add methods to create a link, and fill in the attributes and linkedTo object
 
 	//todo: I don't get the feeling that Java Paths are efficiently encoded. It looks like there is room for
@@ -26,7 +31,7 @@ object Attributes {
 	import java.nio.file.attribute.FileTime
 
 	/** Fails with the exceptions from Files.readAttributes() */
-	def forPath(path: Path): Try[ActorResource] =
+	def forPath(path: Path): Try[APath] =
 		import java.nio.file.LinkOption.NOFOLLOW_LINKS
 		import java.nio.file.attribute.BasicFileAttributes
 		Try {
@@ -37,8 +42,15 @@ object Attributes {
 				Attributes(path, att)
 		}
 
+	/** Return the path but only if an actor can be built from it.
+	 * Todo: The Try may not be woth keeping here, as we don't pass on info if the type was wrong.
+	 **/
+	def actorPath(path: Path): Try[ActorPath] = forPath(path).collect{
+		case a: ActorPath => a
+	}
+
 	def apply(fileName: Path, att: BasicFileAttributes,
-				 collectedAt: Instant = Instant.now()): ActorResource =
+				 collectedAt: Instant = Instant.now()): APath =
 		if att.isDirectory then DirAtt(fileName, att, collectedAt)
 		else if att.isSymbolicLink then
 			if fileName.getFileName.toString.contains('.') then
@@ -104,17 +116,16 @@ object Attributes {
 	}
 
 	//todo: may want to remove this later. Just here to help me refactor code
-	sealed trait ServerManaged extends ActorResource
 	sealed trait Other extends Attributes
-	sealed trait ManagedResource extends ActorResource
+	sealed trait ManagedResource extends ActorPath
 
 	case class DirAtt private[Attributes](
 		override val path: Path, att: BasicFileAttributes, collectedAt: Instant
-	) extends Attributes(att, collectedAt), ActorResource(path)
+	) extends Attributes(att, collectedAt), APath(path), ActorPath
 
 	case class SymLink private[Attributes](
 		override val path: Path, to: Path, att: BasicFileAttributes, collectedAt: Instant
-	) extends Attributes(att, collectedAt), ActorResource(path)
+	) extends Attributes(att, collectedAt), APath(path), ActorPath
 
 	/**
 	 * A Managed Resource such as `.acl`, `card.acl` or `card.meta` can either
@@ -125,19 +136,19 @@ object Attributes {
 	 **/
 	case class DefaultMR private[Attributes](
 		override val path: Path
-	) extends ManagedResource, ActorResource(path)
+	) extends ManagedResource, APath(path), ActorPath
 
 	/** Managed Resource with representation on disk */
 	case class ManagedR private[Attributes](
 		override val path: Path, att: BasicFileAttributes, collectedAt: Instant
-	) extends ManagedResource, Attributes(att, collectedAt), ActorResource(path)
+	) extends ManagedResource, Attributes(att, collectedAt), APath(path), ActorPath
 
 	case class OtherAtt private[Attributes](
 		override val path: Path, att: BasicFileAttributes, collectedAt: Instant
-	) extends Other, Attributes(att, collectedAt), ActorResource(path)
+	) extends Other, Attributes(att, collectedAt), APath(path)
 
 	case class Archived private[Attributes](
 		override val path: Path, att: BasicFileAttributes, collectedAt: Instant
-	) extends Other, Attributes(att, collectedAt), ActorResource(path)
+	) extends Other, Attributes(att, collectedAt), APath(path)
 
 }

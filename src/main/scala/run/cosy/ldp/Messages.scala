@@ -57,6 +57,18 @@ object Messages {
 				val c: CmdMessage[R] = CmdMessage[R](next, from, replyTo)
 				send(c, next.url.path)
 
+		def respondWithScr(res: HttpResponse): ScriptMsg[R] =
+			commands match
+			case Plain(req,k) => ScriptMsg(k(res), from, replyTo)
+			case g@Get(u,k) =>
+				val x: Script[R] = k(Response(
+					Meta(g.url,res.status,res.headers),
+					Failure(Exception("what should I put here? We can only put a failure I think because the " +
+						"response to a Get should be a Graph. So unless this is a serialised graph..."))
+				))
+				ScriptMsg(x, from, replyTo)
+			case Wait(f,u, k) => ??? // not sure what to do here!
+
       /**
 		 * If this is a Plain Http Request then all responses can go through here.
 		 * Otherwise, this actually indicates an error, since the constructed object

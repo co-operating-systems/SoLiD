@@ -8,6 +8,7 @@ import run.cosy.RDF
 class JWKExtractorFn extends munit.FunSuite {
 	import RDF.{*,given}
 	import RDF.ops.{*,given}
+	import RDF.Prefix.security
 	import JWKExtractor.{given,*}
 
 	val jwtRsa = ("""{
@@ -23,7 +24,6 @@ class JWKExtractorFn extends munit.FunSuite {
 						|   "kid" : "2011-04-29"
 						| }""").stripMargin
 
-	val security = SecurityPrefix[Rdf]
 
 
 	test("RDF to JWT") {

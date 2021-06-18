@@ -6,23 +6,24 @@ import sbt.{CrossVersion, _}
 object Dependencies {
 
 	object Versions {
-		val Akka = "2.6.14"
-		val AkkaHttp = "10.2.4"
-		val scalaz = "7.4.0-M7"
-		val circe = "0.14.0-M4"
-		val banana = "0.8.5"
-		val alpakka = "2.0.2"
-		val bouncy = "1.68"
-		val refined = "0.9.23+7-d4890dd0-SNAPSHOT"
-		val catsParse = "0.3.4"
-		val catsCore = "2.6.1"
-		val catsFree = catsCore
-		val catsEffect = "3.1.1"
-		val scalatest = "3.2.9"
-		val titaniumJSonLD = "1.0.0"
-		val nimbusDS = "9.9"
-		val logback = "1.2.3"
+		val Akka               = "2.6.15"
+		val AkkaHttp           = "10.2.4"
+		val scalaz             = "7.4.0-M7"
+		val circe              = "0.14.0-M4"
+		val banana             = "0.8.6-SNAPSHOT"
+		val alpakka            = "2.0.2"
+		val bouncy             = "1.68"
+		val refined            = "0.9.23+7-d4890dd0-SNAPSHOT"
+		val catsParse          = "0.3.4"
+		val catsCore           = "2.6.1"
+		val catsFree           = catsCore
+		val catsEffect         = "3.1.1"
+		val scalatest          = "3.2.9"
+		val titaniumJSonLD     = "1.0.0"
+		val nimbusDS           = "9.9"
+		val logback            = "1.2.3"
 		val apacheCommonsCodec = "1.15"
+		val izumiReflect       = "1.1.3-RC1"
 	}
 
 	//
@@ -30,7 +31,9 @@ object Dependencies {
 	//
 
 	object Scala213Libs {
+
 		import Dependencies.{Versions => V}
+
 		/**
 		 * Akka Http Core
 		 * Apache 2 License
@@ -90,7 +93,9 @@ object Dependencies {
 	// Scala 3 libs
 	//
 	object Scala3Libs {
+
 		import Dependencies.{Versions => V}
+
 		/**
 		 * [[https://www.scalatest.org/install home page]] published under Apache 2 License
 		 *
@@ -108,6 +113,7 @@ object Dependencies {
 
 		/**
 		 * MIT License
+		 *
 		 * @see https://mvnrepository.com/artifact/org.typelevel/cats-core
 		 * @see https://github.com/typelevel/cats
 		 * */
@@ -115,6 +121,7 @@ object Dependencies {
 
 		/**
 		 * MIT License
+		 *
 		 * @see https://mvnrepository.com/artifact/org.typelevel/cats-effect
 		 * @see https://github.com/typelevel/cats-effect
 		 * */
@@ -122,10 +129,13 @@ object Dependencies {
 
 		/**
 		 * MIT License
+		 *
 		 * @see https://mvnrepository.com/artifact/org.typelevel/cats-free
 		 * @see https://github.com/typelevel/cats-free
 		 * */
 		val catsFree = "org.typelevel" %% "cats-free" % V.catsFree
+
+		val izumiReflect = "dev.zio" %% "izumi-reflect" % V.izumiReflect
 
 		/**
 		 * Apache 2 License
@@ -135,13 +145,14 @@ object Dependencies {
 		 */
 		val munit = "org.scalameta" %% "munit" % "0.7.25" % Test
 
-		val all = Seq(scalatest, munit, catsParse, catsCore, catsFree)
+		val all = Seq(scalatest, munit, catsParse, catsCore, catsFree, izumiReflect)
 	}
 
 	//
 	// Java Libs
 	//
 	object JavaLibs {
+
 		import Dependencies.{Versions => V}
 
 		/**

@@ -3,7 +3,7 @@ package run.cosy.ldp.fs
 import akka.actor.typed.scaladsl.ActorContext
 import akka.http.scaladsl.model.Uri
 import run.cosy.ldp.ResourceRegistry
-import run.cosy.ldp.fs.ActorResource
+import run.cosy.ldp.fs.APath
 import run.cosy.ldp.fs.Attributes.{DirAtt, ManagedResource, SymLink}
 import run.cosy.ldp.Messages.{ChildTerminated, Cmd}
 
@@ -16,7 +16,7 @@ class Spawner(val context: ActorContext[BasicContainer.AcceptMsg]) extends AnyVa
 
 	import org.slf4j.Logger
 
-	def spawn(dir: ActorResource, url: Uri)(
+	def spawn(dir: ActorPath, url: Uri)(
 		using reg: ResourceRegistry
 	): Ref =
 		import org.slf4j.Logger

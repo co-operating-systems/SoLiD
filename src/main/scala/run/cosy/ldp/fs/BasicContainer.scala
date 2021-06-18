@@ -4,7 +4,7 @@ import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, Behavior, PostStop, PreRestart}
 import akka.http.scaladsl.model
 import akka.http.scaladsl.model.StatusCodes.{Conflict, Created, Gone, InternalServerError, MovedPermanently, NoContent, NotFound, NotImplemented, OK, PermanentRedirect, UnsupportedMediaType}
-import akka.http.scaladsl.model.headers.{`Content-Type`, `WWW-Authenticate`, Accept, Allow, HttpChallenge, Link, LinkParam, LinkParams, LinkValue, RawHeader, ResponseHeader}
+import akka.http.scaladsl.model.headers.{Accept, Allow, HttpChallenge, Link, LinkParam, LinkParams, LinkValue, RawHeader, ResponseHeader, `Content-Type`, `WWW-Authenticate`}
 import akka.http.scaladsl.model.{HttpMethods, HttpRequest, HttpResponse, StatusCodes, Uri}
 import akka.http.scaladsl.server.ContentNegotiator.Alternative
 import akka.http.scaladsl.server.ContentNegotiator.Alternative.ContentType
@@ -15,29 +15,29 @@ import akka.util.ByteString
 import akka.{Done, NotUsed}
 import run.cosy.http.headers.Slug
 import run.cosy.http.{IResponse, RDFMediaTypes, RdfParser}
-import run.cosy.http.auth.{Agent, Anonymous, KeyIdAgent, WebServerAgent}
+import run.cosy.http.auth.{Agent, Anonymous, Guard, KeyIdAgent, WebServerAgent}
 import run.cosy.http.RDFMediaTypes.`text/turtle`
 import run.cosy.ldp.fs.BasicContainer
-import run.cosy.ldp.fs.BasicContainer.{`Accept-Post`, rdfContentTypes, AllowHeader, LinkHeaders}
+import run.cosy.ldp.fs.BasicContainer.{AllowHeader, LinkHeaders, `Accept-Post`, rdfContentTypes}
 import run.cosy.ldp.{ResourceRegistry, SolidCmd}
 
 import java.io.{BufferedReader, BufferedWriter, FileReader, FileWriter}
 import java.lang.UnsupportedOperationException
 import java.nio.file.attribute.UserDefinedFileAttributeView
-import java.nio.file.{FileAlreadyExistsException, Files, FileSystem, FileVisitOption, Path}
+import java.nio.file.{FileAlreadyExistsException, FileSystem, FileVisitOption, Files, Path}
 import java.time.format.DateTimeFormatter
 import java.time.{LocalDate, LocalDateTime, ZoneId, ZoneOffset}
-import java.util.{stream, Locale}
+import java.util.{Locale, stream}
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success, Try, Using}
 import akka.event.slf4j.Slf4jLogger
-import akka.http.scaladsl.model.HttpMethods._
+import akka.http.scaladsl.model.HttpMethods.*
 import scalaz.NonEmptyList.nel
 import scalaz.{ICons, INil, NonEmptyList}
 
 import scala.collection.immutable.HashMap
 import scala.util.Random
-import _root_.run.cosy.http.util._
+import _root_.run.cosy.http.util.UriX.*
 
 /**
  * An LDP/Solid Container corresponding to a directory on the FileSystem.
@@ -94,8 +94,7 @@ object BasicContainer {
 	import org.w3.banana._
 	import _root_.run.cosy.RDF.{given, _}
 	import _root_.run.cosy.RDF.ops.{given,_}
-	val ldp = LDPPrefix[Rdf]
-
+	import _root_.run.cosy.RDF.Prefix.ldp
 	val ldpBC = ldp.BasicContainer.toAkka
 	val ldpr = ldp.Resource.toAkka
 	
@@ -282,13 +281,15 @@ class BasicContainer private(
 	import run.cosy.ldp.Messages._
 	import run.cosy.ldp.SolidCmd.{Get, Plain, Script, Wait}
 	import run.cosy.ldp.fs.{CRef, Ref, RRef}
-	import run.cosy.ldp.fs.ActorResource
+	import run.cosy.ldp.fs.APath
 	import run.cosy.ldp.fs.Attributes.{Archived, Other, OtherAtt}
 
 	import java.nio.file.attribute.BasicFileAttributes
 	import java.time.Instant
-	//Cashed Contents of Directory
-	type Contents = HashMap[String,Ref|Other]
+	//The types of references to data about respources associated with a path
+	// `Ref`s have already launched an Actor
+	type Refs = Ref|ActorPath
+	type Contents = HashMap[String,Refs]
 	type Counter  = Map[String, Int]
 	// one could add a behavior for if it exists but is not a container
 
@@ -307,6 +308,8 @@ class BasicContainer private(
 
 	// url for resource with `name` in this container
 	def urlFor(name: String): Uri = containerUrl.withPath(containerUrl.path / name)
+	lazy val aclUri: Uri              = containerUrl.withPath(containerUrl.path?/".acl")
+//	lazy val dotLinkName: DotFileName = DotFileName(linkName)
 
 	/** Return a Source for reading the relevant files for this directory.
 	 * Note: all symbolic links and dirs are our resources, so long as they
@@ -361,21 +364,6 @@ class BasicContainer private(
 		import java.time.Instant
 		import scala.annotation.tailrec
 
-		def Authorize(wd: WannaDo): Behavior[AcceptMsg] =
-			//we have to build a future to fetch the DataSets needed
-			// or a future that calculates the Authorization of the user using those datasets
-			// then we can use that future
-			// context.context.pipeToSelf(futureCalc){ case success ... case failure ... }
-			context.log.info(s"in Authorize for $dirPath. received $wd")
-			if true || List(WebServerAgent,KeyIdAgent("/user/key#")).exists(_ == wd.msg.from) then
-				//todo: authorization will result in a Future, so one will then use context.pipeToSelf
-				context.context.self ! wd.toDo
-			else wd.msg.respondWith(HttpResponse(StatusCodes.Unauthorized,
-				Seq(`WWW-Authenticate`(HttpChallenge("Signature",s"$dirPath")))
-			))
-			Behaviors.same
-
-
 		/**
 		 * Create ACL file.
 		 * When should this be done? Certainly on creation. But what if there is no ACL on
@@ -390,7 +378,8 @@ class BasicContainer private(
 				import BasicContainer.PostCreation
 				msg match
 				case wd: WannaDo =>
-					Authorize(wd)
+					given ac: ActorContext[ScriptMsg[_]|Do] = context.context.asInstanceOf[ActorContext[ScriptMsg[_]|Do]]
+					Guard.Authorize(wd.msg,aclUri)
 					Behaviors.same
 				case script: ScriptMsg[_] =>
 					import script.given
@@ -447,27 +436,24 @@ class BasicContainer private(
 		 * @prefix createActorIfNeeded if the resource has not actor associated with it, created it first
 		 * @return the Ref and the new Dir state, or None of there is no Reference at that location.
 		 * */
-		def getRef(name: String): Option[(Ref|Other, Dir)] =
+		def getRef(name: String): Option[(Ref, Dir)] =
 			context.log.info(s"in <$dirPath>.getRef($name)")
-			contains.get(name).map { (v : Ref|Other)  =>
+			contains.get(name).map { (v : Refs)  =>
 				v match
-				case ref: Ref => (ref, Dir.this)
-				case fa: ActorResource  =>
+				case ref: Ref  => (ref, Dir.this)
+				case fa: ActorPath =>
 					val r = context.spawn(fa,urlFor(name))
 					(r, new Dir(contains + (name -> r), counters))
-				case ar: Other => (ar, Dir.this)
 			}.orElse {
 				import java.io.IOException
 				import java.nio.file.LinkOption.NOFOLLOW_LINKS
 				import java.nio.file.attribute.BasicFileAttributes
 				val path = dirPath.resolve(name)  //todo: also can throw exception
 				context.log.info(s"resolved <$dirPath>.resolve($name)=$path")
-				Attributes.forPath(path) match
-					case Success(att: ActorResource) =>
+				Attributes.actorPath(path) match
+					case Success(att: APath) =>
 						val r: Ref = context.spawn(att,urlFor(name))
 						Some((r, new Dir(contains + (name -> r), counters)))
-					case Success(aro : Other) =>
-						Some((aro, new Dir(contains + (name -> aro), counters)))
 					case Failure(err) =>
 						err match
 						case e: UnsupportedOperationException =>
@@ -663,14 +649,6 @@ class BasicContainer private(
 					Behaviors.same
 		end run
 
-//		def listContents: Source[ByteString, NotUsed] = {
-//			import java.nio.file.FileTreeWalker
-//			BasicContainer.ls(dirPath).map{ (e: FileTreeWalker.Event) =>
-//				ByteString(
-//					s"""<> ldp:contains ${e.}
-//						|""".stripMargin)
-//			}
-//		}
 
 		protected
 		def routeHttpReq(msg: RouteMsg): Behavior[AcceptMsg] =
@@ -681,7 +659,7 @@ class BasicContainer private(
 					case Some(s) if s(0) == '.' => forwardToContainer(msg.nextSegment, doit)
 					case _ => forwardMsgToResourceActor(msg.nextSegment, doit)
 				}
-			case route: RouteMsg => forwardToContainer(msg.nextSegment, route)
+			case route: Route => forwardToContainer(msg.nextSegment, route)
 
 
 		def forwardToContainer(name: String, route: Route): Behavior[AcceptMsg] = {
@@ -700,17 +678,17 @@ class BasicContainer private(
 						case wd : WannaDo =>  //we pass on to the server managed actor
 							context.log.info(s"We are dispatching SMRef to $actor")
 							actor ! wd
-						case RouteMsg(path, reqmsg) => // the path passes through a file, so it must end here
+						case r: Route => // the path passes through a file, so it must end here
 							context.log.error("We should never arrive at this point!! Look at how we got here")
-							reqmsg.respondWith(HttpResponse(InternalServerError, Seq(),
-								s"Resource with URI ${reqmsg.target} does not exist"))
+							r.msg.respondWith(HttpResponse(InternalServerError, Seq(),
+								s"Resource with URI ${r.msg.target} does not exist"))
 					case RRef(att, actor) => // there is no container, so redirect to resource
 						route match
 						case WannaDo(cmd) =>  //we're at the path end, so we can redirect
 							val redirectTo = cmd.target.withoutSlash
 							route.msg.redirectTo(redirectTo,"There is no container here. we will redirect to the resource")
-						case RouteMsg(path, reqmsg) => // the path passes through a file, so it must end here
-							reqmsg.respondWith(HttpResponse(NotFound, Seq(), s"Resource with URI ${reqmsg.target} does not exist"))
+						case r: Route => // the path passes through a file, so it must end here
+							r.msg.respondWith(HttpResponse(NotFound, Seq(), s"Resource with URI ${r.msg.target} does not exist"))
 					case _: Archived => route.msg.respondWith(HttpResponse(Gone))
 					case _: OtherAtt => route.msg.respondWith(HttpResponse(NotFound))
 					dir.start
@@ -766,7 +744,7 @@ class BasicContainer private(
 		 * */
 		def actorNameFor(resourceName: String): String =
 			if resourceName.size > 1 then
-				resourceName(0) + resourceName.substring(1).takeWhile(_ != '.')
+				s"${resourceName(0)}${resourceName.substring(1).takeWhile(_ != '.')}"
 			else resourceName
 	}
 

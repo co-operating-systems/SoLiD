@@ -16,7 +16,9 @@ object RDF {
 	export Jena.given
 
 	extension (uri: Uri)
-		def toRdf: Rdf#Node = ops.URI(uri.toString)
+		def toRdf: Rdf#URI = ops.URI(uri.toString)
+		//inheritance of type projections does not work in Scala 3
+		def toRdfNode: Rdf#Node = ops.URI(uri.toString)
 
 	extension (rdfUri: Rdf#URI)
 		def toAkka: Uri = Uri(ops.getString(rdfUri))
@@ -26,11 +28,31 @@ object RDF {
 
 	// todo: add this to banana
 	//see https://github.com/lampepfl/dotty/discussions/12527
-	implicit def URIToNode: ToNode[Rdf,Rdf#URI] = new ToNode[Rdf, Rdf#URI] {
+	implicit val URIToNode: ToNode[Rdf,Rdf#URI] = new ToNode[Rdf, Rdf#URI]:
 		def toNode(t: Rdf#URI): Rdf#Node = t
-	}
-	implicit def BNodeToNode: ToNode[Rdf,Rdf#BNode] = new ToNode[Rdf, Rdf#BNode] {
+
+	implicit val BNodeToNode: ToNode[Rdf,Rdf#BNode] = new ToNode[Rdf, Rdf#BNode]:
 		def toNode(t: Rdf#BNode): Rdf#Node = t
+
+	implicit val LiteralToNode: ToNode[Rdf,Rdf#Literal] = new ToNode[Rdf, Rdf#Literal]:
+		def toNode(t: Rdf#Literal): Rdf#Node = t
+
+
+//	implicit val URIToNodeConv: Conversion[Rdf#URI, Rdf#Node] = (u: Rdf#URI) =>  u.asInstanceOf[Rdf#Node]
+//	implicit val LiteralToNodeConv: Conversion[Rdf#Literal, Rdf#Node] = (lit: Rdf#Literal) =>  lit.asInstanceOf[Rdf#Node]
+//	implicit val BNodeToNodeConv: Conversion[Rdf#BNode, Rdf#Node] = (bn: Rdf#BNode) =>  bn.asInstanceOf[Rdf#Node]
+
+	object Prefix {
+
+		import org.w3.banana.{LDPPrefix, RDFPrefix, WebACLPrefix}
+		import run.cosy.http.auth.SecurityPrefix
+
+		val wac = WebACLPrefix[Rdf]
+		val rdf = RDFPrefix[Rdf]
+		val ldp = LDPPrefix[Rdf]
+		val security = SecurityPrefix[Rdf]
+
+
 	}
 
 }

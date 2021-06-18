@@ -1,32 +1,34 @@
 package run.cosy.ldp.fs
 
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
-import akka.actor.typed.{scaladsl, ActorRef, Behavior}
+import akka.actor.typed.{ActorRef, Behavior, scaladsl}
 import akka.http.scaladsl.common.StrictForm.FileData
 import akka.http.scaladsl.model.MediaTypes.{`text/plain`, `text/x-java-source`}
 import akka.http.scaladsl.model.ContentTypes.{`text/html(UTF-8)`, `text/plain(UTF-8)`}
 import akka.http.scaladsl.model.HttpCharsets.`UTF-8`
-import akka.http.scaladsl.model._
-import akka.http.scaladsl.model.headers.{`Content-Type`, `WWW-Authenticate`, Accept, Allow, ETag, HttpChallenge, Link, LinkParams, LinkValue, Location}
-import akka.http.scaladsl.model.StatusCodes.{NotFound, Conflict, Created, Gone, InternalServerError, MethodNotAllowed, NoContent}
+import akka.http.scaladsl.model.*
+import akka.http.scaladsl.model.headers.{Accept, Allow, ETag, HttpChallenge, Link, LinkParams, LinkValue, Location, `Content-Type`, `WWW-Authenticate`}
+import akka.http.scaladsl.model.StatusCodes.{Conflict, Created, Gone, InternalServerError, MethodNotAllowed, NoContent, NotFound}
 import akka.http.scaladsl.server.ContentNegotiator.Alternative.ContentType
 import akka.stream.{IOResult, Materializer}
 import akka.stream.scaladsl.FileIO
 import run.cosy.http.FileExtensions
 import run.cosy.http.auth.{KeyIdAgent, WebServerAgent}
 import run.cosy.ldp.ResourceRegistry
-import run.cosy.ldp.Messages._
-import run.cosy.ldp.fs.Resource.{connegNamesFor, extension, headersFor, StateSaved}
+import run.cosy.ldp.Messages.{Do, *}
+import run.cosy.ldp.fs.Resource.{StateSaved, connegNamesFor, extension, headersFor}
 import run.cosy.http.auth.KeyIdAgent
 import run.cosy.ldp.fs.BasicContainer.{LinkHeaders, PostCreation}
 
-import java.nio.file.{CopyOption, Files, Path => FPath}
+import java.nio.file.{CopyOption, Files, Path as FPath}
 import java.nio.file.attribute.{BasicFileAttributes, FileAttribute}
 import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.security.Principal
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
-import run.cosy.http.RDFMediaTypes._
+import run.cosy.http.RDFMediaTypes.*
+import run.cosy.http.util.UriX._
+
 
 
 //import akka.http.scaladsl.model.headers.{RequestClientCertificate, `Tls-Session-Info`}
@@ -34,13 +36,13 @@ import run.cosy.http.RDFMediaTypes._
 object Resource {
 
 	import akka.stream.Materializer
-	import BasicContainer.ldp
+	import run.cosy.RDF.Prefix.ldp
 
 	import java.nio.file.Path
 	import scala.concurrent.ExecutionContext
 
-	type AcceptMsg = ScriptMsg[_] | WannaDo | Do | PostCreation | StateSaved
-	
+	type AcceptMsg = ScriptMsg[_] | Do | WannaDo | PostCreation | StateSaved
+
 	//guard could be a pool?
 	//var guard: ActorRef = _
 
@@ -92,16 +94,16 @@ object Resource {
 	def connegNamesFor(name: String, ct: `Content-Type`): List[String] =
 		ct.contentType.mediaType.fileExtensions.map(name + "." + _)
 
-	object Version {
-		def unapply(ver: String): Option[Int] = ver.toIntOption
-	}
-
-	import run.cosy.RDF.{given,_}
-	import run.cosy.RDF.ops.{given,_}
+	import org.w3.banana.PointedGraphs
+	import run.cosy.RDF.*
+	import run.cosy.RDF.ops.*
+	import run.cosy.http.auth.Agent
+	import run.cosy.ldp.SolidCmd.ReqDataSet
 
 	/** change to wac.imports when available */
 	val defaultACLGraph: Rdf#Graph = (URI("") -- owl.imports ->- URI(".acl")).graph
 	val defaultACLGraphContainer: Rdf#Graph = (URI("") -- owl.imports ->- URI("../.acl")).graph
+
 
 }
 
@@ -115,6 +117,7 @@ class Resource(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg]) exte
 		if linkedToFile.endsWith(".archive") then Some(GoneBehavior)
 		else None
 
+	override
 	def linkDoesNotExistBehavior:  Behaviors.Receive[AcceptMsg] =
 		Behaviors.receiveMessage[AcceptMsg] { (msg: AcceptMsg) =>
 			msg match
@@ -127,6 +130,9 @@ class Resource(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg]) exte
 				case StateSaved(_, cmsg) =>
 					context.log.warn(s"received a state saved on source <$uri> at <$linkPath> that has been does not have a symlink!")
 					cmsg.respondWith(HttpResponse(InternalServerError,entity=HttpEntity("please contact admin")))
+				case script: ScriptMsg[_] =>
+					import script.given
+					script.continue
 			Behaviors.stopped
 		}
 
@@ -181,6 +187,10 @@ class Resource(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg]) exte
 				route.msg.respondWith(HttpResponse(Conflict,
 					entity=HttpEntity("the resource is not yet completely uploaded. Try again later.")))
 				Behaviors.same
+			case script: ScriptMsg[_] =>
+				import script.given
+				script.continue
+				Behaviors.same
 	}
 }
 
@@ -208,7 +218,6 @@ class ACResource(uri: Uri, path: FPath, context: ActorContext[AcceptMsg]) extend
 	import run.cosy.ldp.fs.Resource.AcceptMsg
 	import run.cosy.RDF.{given,_}
 	import run.cosy.RDF.ops.{given,_}
-	import run.cosy.http.util.fileName
 	//For container managed resources these are not appicable.
 
 	override def fileSystemProblemBehavior(e: Exception): Behaviors.Receive[AcceptMsg] = ???
@@ -223,7 +232,7 @@ class ACResource(uri: Uri, path: FPath, context: ActorContext[AcceptMsg]) extend
 
 	// We should adopt default behavior perhaps`
 	@throws[SecurityException]
-	override 
+	override
 	def linkedToFileDoesNotExist(linkTo: String): Option[Behaviors.Receive[AcceptMsg]] =
 		if !Files.exists(path.resolveSibling(linkTo)) then Some(defaultBehavior)
 		else None
@@ -242,7 +251,7 @@ class ACResource(uri: Uri, path: FPath, context: ActorContext[AcceptMsg]) extend
 		import run.cosy.ldp.fs.BasicContainer.AcceptMsg
 		import run.cosy.ldp.SolidCmd
 
-		override 
+		override
 		def doPlainGet[A](
 			cmdmsg: CmdMessage[A], req: HttpRequest,
 			f: HttpResponse => SolidCmd.Script[A]
@@ -348,18 +357,23 @@ trait ResourceTrait(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg])
 	import Resource.mediaType
 	import context.log
 	import run.cosy.ldp.fs.Resource.LDPR
+	import run.cosy.ldp.SolidCmd.ReqDataSet
+	import run.cosy.http.auth.Agent
+	import run.cosy.ldp.SolidCmd
 
 	val linkName = linkPath.getFileName.toString
-	lazy val dotLinkName: List[String] = linkName.split('.').toList
-	var aclActorDB : Option[ActorRef[AcceptMsg]] =  None
+	//todo. replace with DotFileName
+	final lazy val dotLinkName: Dot = Dot(linkName)
+	def aclName = linkName + ".acl"
+	val aclUri = uri.sibling(aclName)
 
+	var aclActorDB : Option[ActorRef[AcceptMsg]] =  None
 	def aclActor : ActorRef[AcceptMsg] = aclActorDB.getOrElse {
-		import run.cosy.http.util.sibling
-		val aclName = linkName + ".acl"
-		val aclUri = uri.sibling(aclName)
-		aclActorDB = Some(context.spawn(ACResource(aclUri,linkPath.resolveSibling(aclName),aclName),aclName))
+		val acn = aclName
+		aclActorDB = Some(context.spawn(ACResource(aclUri,linkPath.resolveSibling(acn),acn),acn))
 		aclActorDB.get
 	}
+	given ac: ActorContext[ScriptMsg[_]|Do] = context.asInstanceOf[ActorContext[ScriptMsg[_]|Do]]
 
 	def behavior: Behaviors.Receive[AcceptMsg] =
 		try {
@@ -372,26 +386,12 @@ trait ResourceTrait(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg])
 			val linkTo: FPath = linkPath.resolveSibling(relativeLinkToPath)
 
 			val linkToFileName = linkTo.getFileName.toString
-			//ACR: only applicable for resources (not Server managed resources such as ACRs)
 			archivedBehavior(linkToFileName).orElse {
 				linkedToFileDoesNotExist(linkToFileName)
 			}.orElse{ Try{
-				// we capture the version and encoding from the linked to name.
-				// Examples:
-				//   `card` -> `card.2.ttl`
-				//   `card.acl` -> `card.acl.3.ttl`
-				// This covers both cases, but we still need a message for `card.acl` to
-				// be routed via the `card` actor to the `card.acl` actor
-				val dotpaths = linkToFileName.split('.').toList
-				if !dotpaths.startsWith(dotLinkName) then
-					fileSystemProblemBehavior(new Exception("Storage problem."))
-				else
-					val version = dotpaths.drop(dotLinkName.size) match
-						case List(version, extension) =>
-							//note that if version is not a number, we count it as 0
-							version.toIntOption.getOrElse(0)
-						case List(extension) => 0
-					VersionsInfo(version, linkTo).NormalBehavior
+				linkToFileName match
+				case dotLinkName.File(version, extension) => VersionsInfo(version, linkTo).NormalBehavior
+				case _ => fileSystemProblemBehavior(new Exception("Storage problem."))
 			}.toOption}.get
 		} catch {//TODO: clean this up!
 			case nsfe: java.nio.file.NoSuchFileException => linkDoesNotExistBehavior
@@ -436,7 +436,10 @@ trait ResourceTrait(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg])
 			case StateSaved(_, cmsg) =>
 				context.log.warn(s"received a state saved on source <$uri> at <$linkPath> that has been does not have a symlink!")
 				cmsg.respondWith(HttpResponse(InternalServerError,entity=HttpEntity("please contact admin")))
-		Behaviors.stopped
+			case script: ScriptMsg[_] =>
+				import script.given
+				script.continue
+			Behaviors.stopped
 	}
 
 	/**
@@ -488,6 +491,10 @@ trait ResourceTrait(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg])
 				case StateSaved(_, cmsg) =>
 					log.warn(s"received a state saved on source <$uri> at <$linkPath> that has been deleted!")
 					cmsg.respondWith(HttpResponse(InternalServerError,entity=HttpEntity("please contact admin")))
+				case script: ScriptMsg[_] =>
+					import script.given
+					script.continue
+					Behaviors.same
 			Behaviors.same
 		}
 
@@ -548,11 +555,11 @@ trait ResourceTrait(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg])
 		import akka.http.scaladsl.model.StatusCodes.{Created, Gone, InternalServerError}
 		import Resource.{eTag, lastModified, AllowHeader}
 		import run.cosy.http.auth.Agent
-		import run.cosy.ldp.SolidCmd.{Plain, Script}
+		import run.cosy.ldp.SolidCmd.{Get, Plain, Script}
 		import run.cosy.ldp.SolidCmd
 		import run.cosy.ldp.fs.BasicContainer.AcceptMsg
-		import run.cosy.http.util._
 		var PUTstarted = false
+
 
 		def vName(v: Int): String = linkName+"."+v
 
@@ -569,22 +576,13 @@ trait ResourceTrait(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg])
 
 		def VersionLinks(v: Int): List[LinkValue] = LatestVersion()::(PrevVersion(v):::NextVersion(v))
 
-		def Authorize(wd: WannaDo) =
-			context.log.info(s"Authorize($wd)")
-			if true || List(WebServerAgent,KeyIdAgent("/user/key#")).exists(_ == wd.msg.from) then
-				import wd.{given, *}
-				context.self ! Do(wd.msg)
-			else wd.msg.respondWith(HttpResponse(StatusCodes.Unauthorized,
-				Seq(`WWW-Authenticate`(HttpChallenge("Signature",s"${wd.msg.target}")))
-			))
-			Behaviors.same
-
 
 		def NormalBehavior: Behaviors.Receive[Resource.AcceptMsg] =
 			import Resource._
 			import run.cosy.ldp.SolidCmd
 			import SolidCmd.{Plain,Get,Wait}
 			import akka.http.scaladsl.model.StatusCodes.OK
+			import run.cosy.http.auth.Guard
 
 			Behaviors.receiveMessage[Resource.AcceptMsg] { (msg: Resource.AcceptMsg) =>
 				context.log.info(s"in NormalBehavior of VersionsInfo($lastVersion, $linkTo) << $msg")
@@ -593,19 +591,10 @@ trait ResourceTrait(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg])
 					import script.given
 					script.continue
 					Behaviors.same
-				case wd: WannaDo =>
+				case WannaDo(cmdmsg @ CmdMessage(commands, from, replyTo)) =>
 					//first we need to see if we need to route the Wannado
-					val target: Uri = wd.msg.target
-					val fparts: List[String] = target.fileName.toList.flatMap(_.split('.').toList)
-					//we remote the initial parts that belong to this resource
-					if fparts.startsWith(dotLinkName) && fparts.size > dotLinkName.size then
-						val remaining = fparts.drop(dotLinkName.size)
-						//todo: consider generalising to other Server Managed resources such as a `meta` file
-						if remaining.head == "acl" then
-							//todo: first check if the new acl actor is not the same as this one.
-							aclActor ! wd
-						else Authorize(wd)
-					else Authorize(wd)
+					if dotLinkName.hasACR(cmdmsg.target.fileName.get) then aclActor ! msg
+					else Guard.Authorize(cmdmsg,aclUri)
 					Behaviors.same
 				case Do(cmdmsg @ CmdMessage(cmd,agent,replyTo)) =>
 					import cmdmsg.given
@@ -698,7 +687,7 @@ trait ResourceTrait(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg])
 		 *      all versions of a resource, and we can use the creation metadata of the FS to
 		 *      work out what the versions are. We can even use numbering with missing parts, because
 		 *      getting a full list of the versions and reconstituting the numbers is easy given
-		 *      that they are confined in a directory. 
+		 *      that they are confined in a directory.
 		 *    a. we need to keep a resource (attribute or file) of the versions and their relations
 		 *    a. we don't allow another PUT before the previous one is finished...
 		 *
@@ -795,32 +784,23 @@ trait ResourceTrait(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg])
 			val accMR: Seq[MediaRange] = req.headers[Accept].flatMap(_.mediaRanges)
 			context.log.info(s"PlainGet. accMR=$accMR")
 			if accMR.exists(_.matches(mt)) then
-				import Resource.Version
-				import run.cosy.http.util.fileName
-				//ACR: we need .acl.2.ttl or card.acl.ttl or card.acl.3.ttl
-				val fnsplit: List[String] = req.uri.fileName.get.split('.').toList
-				context.log.info(s"PlainGet.fns=$fnsplit")
-				if !fnsplit.startsWith(dotLinkName) || fnsplit.size < dotLinkName.size then
-					HttpResponse(StatusCodes.InternalServerError,Seq(),s"problem with link on file system for ${req.uri}")
-				else fnsplit.drop(dotLinkName.size) match {
-					case List(Version(num),ext) if mt.fileExtensions.contains(ext) =>
-						GetVersionResponse(linkPath.resolveSibling(fnsplit.mkString(".")),num,mt)
-					case List(Version(num)) if num >= 0 && num <= lastVersion =>
+				dotLinkName.remaining(req.uri.fileName.get) match
+					case Some(List(AsInt(num),ext)) if mt.fileExtensions.contains(ext) =>
+						GetVersionResponse(linkPath.resolveSibling(dotLinkName.baseName),num,mt)
+					case Some(List(AsInt(num))) if num >= 0 && num <= lastVersion =>
 						//the request is for a version, but mime left open
 						GetVersionResponse(
-							linkPath.resolveSibling(
-								(fnsplit ::: List(""+num, mt.fileExtensions.head)).mkString(".")),
+							linkPath.resolveSibling(dotLinkName.Version(num, mt.fileExtensions.head).name),
 							num, mt)
-					case Nil => GetVersionResponse(linkTo,lastVersion,mt)
+					case Some(List()) => GetVersionResponse(linkTo,lastVersion,mt)
 					case _ => HttpResponse(
 						StatusCodes.NotFound,
 						entity=HttpEntity(s"could not find resource for <${req.uri}> with "+req.headers)
 					)
-				}
 			else
 				import akka.http.scaladsl.model.ContentTypes.`text/html(UTF-8)`
 				HttpResponse(
-					StatusCodes.UnsupportedMediaType, 
+					StatusCodes.UnsupportedMediaType,
 					entity=HttpEntity(`text/html(UTF-8)`,
 						s"requested content Types where $accMR but we only have $mt"
 					))
@@ -828,22 +808,22 @@ trait ResourceTrait(uri: Uri, linkPath: FPath, context: ActorContext[AcceptMsg])
 
 		/**
 		 * Specified in:
-		 *  - [[https://tools.ietf.org/html/rfc7231#section-4.3.5 4.3.5 DELETE]] of HTTP 1.1 RFC 7231 
+		 *  - [[https://tools.ietf.org/html/rfc7231#section-4.3.5 4.3.5 DELETE]] of HTTP 1.1 RFC 7231
 		 *  - [[https://www.w3.org/TR/ldp/#ldpc-HTTP_DELETE 5.2.5 HTTP DELETE]] of LDP spec
 		 *  - [[https://solidproject.org/TR/protocol#deleting-resources in 5.4 Deleting Resources]] of Solid Protocol
-		 *  
+		 *
 		 * Creates a "file.archive" directory, moves the link into it and points the link to the archive.
 		 * Then it can return a response. And the done behavior is started after cleanup.
-		 *  
+		 *
 		 * Should also delete Auxilliary resources (which at present just include the linked-to document)
 		 * When done the actor must shutdown and send a deleted notification to the parent, so that it
 		 * can remove the link from its cache.
-		 * 
+		 *
 		 * what should one do if a delete fails on some of the resources?
-		 * Best to create an archive directory and move all files there, so that they are no longer visible, 
+		 * Best to create an archive directory and move all files there, so that they are no longer visible,
 		 * and can be cleaned away later.
 		 *
-		 * 
+		 *
 		 * @param req the DELETE Request
 		 * @param replyTo
 		 * @return

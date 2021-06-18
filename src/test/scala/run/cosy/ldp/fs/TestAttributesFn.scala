@@ -25,9 +25,9 @@ class TestAttributesFn extends munit.FunSuite {
 		assertEquals(sl.to,Paths.get("hello.txt"),att)
 		
 		//teest the created symlink directly
-		val slatTry: Try[ActorResource] = Attributes.forPath(sl.path)
+		val slatTry: Try[APath] = Attributes.forPath(sl.path)
 		assert(slatTry.isSuccess)
-		val slatt: ActorResource = slatTry.get
+		val slatt: APath = slatTry.get
 		slatt match {
 			case symLink : Attributes.SymLink => 
 				import java.nio.file.LinkOption
