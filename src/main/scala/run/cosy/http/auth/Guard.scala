@@ -20,7 +20,7 @@ object Guard {
 	import org.w3.banana.syntax.{GraphW, NodeW}
 	import run.cosy.RDF.*
 	import run.cosy.RDF.ops.*
-	import run.cosy.RDF.Prefix.{rdf, security, wac}
+	import run.cosy.RDF.Prefix.{rdf, security, wac, foaf}
 	import run.cosy.http.util.UriX.*
 	import run.cosy.ldp.Messages.{Do, ScriptMsg, WannaDo}
 	import run.cosy.ldp.SolidCmd.{fetchWithImports, unionAll, Get, Plain, Script, Wait}
@@ -48,7 +48,10 @@ object Guard {
 	 * Because this is all in one graph it could actually be implemented as a SPARQL query.
 	 */
 	def authorize(acg: Rdf#Graph, agent: Agent, target: Uri, operation: GMethod): Boolean =
-		(filterRulesFor(acg, target, operation) / wac.agent).exists { pg =>
+		val rules = filterRulesFor(acg, target, operation)
+		(rules / wac.agentClass).exists{ pg =>
+			pg.pointer == foaf.Agent
+		} || (rules / wac.agent).exists { pg =>
 			agent match
 				case KeyIdAgent(keyId, _) => pg.graph.select(keyId.toRdf, security.controller, pg.pointer).hasNext
 				case _ => false
@@ -69,7 +72,7 @@ object Guard {
 		val targetRsrc: Rdf#URI = target.toRdf
 		//we assume that all rules are typed
 		val rules: PointedGraphs[Rdf] = PointedGraph[Rdf](wac.Authorization, acRulesGraph) /- rdf.`type`
-		//todo: add filter to banana-rdf 
+		//todo: add filter to banana-rdf
 		val it: Iterable[Rdf#Node] = rules.nodes.filter { (node: Rdf#Node) =>
 			acRulesGraph.find(node, wac.mode, modeFor(operation)).hasNext &&
 				(acRulesGraph.select(node, wac.accessTo, targetRsrc).hasNext ||
@@ -92,9 +95,9 @@ object Guard {
 		import akka.actor.typed.Behavior
 		for {
 			reqDS <- fetchWithImports(aclUri)
-		} yield 
+		} yield
 			method match
-				case m: GMethod => authorize(unionAll(reqDS),agent,target,m)
+				case m: GMethod => authorize(unionAll(reqDS), agent, target, m)
 				case _ => false
 
 	/** we authorize the top command `msg` - it does not really matter what T the end result is. */
@@ -122,11 +125,17 @@ object Guard {
 					ref => ScriptMsg[Boolean](
 						authorizeScript(aclUri, msg.from, msg.target, p.req.method), WebServerAgent, ref)
 				){
-					case Success(true) =>  Do(msg)
-					case Success(false) => msg.respondWithScr(HttpResponse(StatusCodes.Unauthorized,
+					case Success(true) =>
+						context.log.info(s"Successfully authorized ${msg.target} ")
+						Do(msg)
+					case Success(false) =>
+						context.log.info(s"failed to authorize ${msg.target} ")
+						msg.respondWithScr(HttpResponse(StatusCodes.Unauthorized,
 							Seq(`WWW-Authenticate`(HttpChallenge("Signature",s"${msg.target}")))
 					))
-					case Failure(e) => msg.respondWithScr(HttpResponse(StatusCodes.Unauthorized,
+					case Failure(e) =>
+						context.log.info(s"Unable to authorize ${msg.target}: $e ")
+						msg.respondWithScr(HttpResponse(StatusCodes.Unauthorized,
 							Seq(`WWW-Authenticate`(HttpChallenge("Signature",s"${msg.target}"))),
 							HttpEntity(ContentTypes.`text/plain(UTF-8)`,e.getMessage))
 					)

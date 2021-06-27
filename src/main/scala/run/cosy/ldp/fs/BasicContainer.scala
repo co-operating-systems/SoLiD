@@ -127,17 +127,15 @@ object BasicContainer {
 		linkName +".0."+cts.contentType.mediaType.fileExtensions.headOption.getOrElse("bin")
 
 	/** @return (linkName, linkTo) strings */
-	def createLinkNames(req: HttpRequest)(using clock: Clock): (String, String) = {
+	def createLinkNames(req: HttpRequest)(using clock: Clock): (String, String) = 
 		val linkName = createNewResourceName(req)
 		val linkTo = linkToName(linkName, req.entity.contentType)
 		(linkName, linkTo)
-	}
 
-	def createNewResourceName(req: HttpRequest)(using clock: Clock): String = {
+	def createNewResourceName(req: HttpRequest)(using clock: Clock): String = 
 		req.headers.collectFirst{case Slug(name) => name}
 			.map(slug => santiseSlug(slug.toString))
 			.getOrElse(createTimeStampFileName)
-	}
 
 //	import java.nio.file.{FileTreeWalker,FileVisitOption}
 //	def ls(start: Path, options: FileVisitOption*): Source[FileTreeWalker.Event, NotUsed] =

@@ -2,6 +2,8 @@ package run.cosy
 
 import org.w3.banana.jena.Jena
 import akka.http.scaladsl.model.Uri
+import org.apache.jena.sparql.vocabulary.FOAF
+import org.w3.banana.FOAFPrefix
 /**
  * Set your preferred implementation of banana-rdf here.
  * Note: this way of setting a preferred implementation of RDF means that
@@ -50,8 +52,8 @@ object RDF {
 		val wac = WebACLPrefix[Rdf]
 		val rdf = RDFPrefix[Rdf]
 		val ldp = LDPPrefix[Rdf]
+		val foaf = FOAFPrefix[Rdf]
 		val security = SecurityPrefix[Rdf]
-
 
 	}
 

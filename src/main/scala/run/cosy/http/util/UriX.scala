@@ -38,5 +38,8 @@ object UriX:
 			(other.scheme == uri.scheme) && (other.authority == uri.authority) &&
 				(other.path.startsWith(uri.path))
 
+		def /(segment: String): Uri = uri.withPath(uri.path/segment)
+		def ?/(segment: String): Uri = uri.withPath(uri.path?/segment)
+
 
 
