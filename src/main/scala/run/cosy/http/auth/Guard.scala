@@ -78,7 +78,7 @@ object Guard {
 			acRulesGraph.find(node, wac.mode, modeFor(operation)).hasNext &&
 				(acRulesGraph.select(node, wac.accessTo, targetRsrc).hasNext ||
 					acRulesGraph.select(node, wac.default, ANY).exists { (tr: Rdf#Triple) =>
-						tr.subject.fold(u => u.toAkka.ancestorOf(target), x => false, z => false)
+						tr.objectt.fold(u => u.toAkka.ancestorOf(target), x => false, z => false)
 					})
 		}
 		PointedGraphs(it, acRulesGraph)

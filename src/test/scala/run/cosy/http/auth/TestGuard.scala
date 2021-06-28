@@ -30,6 +30,11 @@ class TestGuard extends munit.FunSuite {
 		assertEquals(Guard.filterRulesFor(aclGraph, rootUri, GET).nodes.toList, List(podRdfAcl.withFragment("Public")))
 		val answer = Guard.authorizeScript(rootAcl, new Anonymous(), rootUri, GET).foldMap(aclBasic.eval)
 		assert(answer, true)
+
+		val timBlCardUri = ws.base / "People" /"Berners-Lee"/"card"
+		val answer2 = Guard.authorizeScript(rootAcl, new Anonymous(), timBlCardUri, GET).foldMap(aclBasic.eval)
+		assert(answer2, true)
+
 	}
 
 
