@@ -60,7 +60,8 @@ object Guard {
 	/**
 	 * from a graph of rules, return a stream of pointers to the rules that apply to the given target
 	 * and operation.
-	 * The only description supported to start with is acl:default, and we test this by substring the URL.
+	 * The only description supported to start with is acl:default, and we test this by substring on the path of
+	 * the URL.
 	 * todo: we don't deal with rules that specify the target by description, which would require looking
 	 * up metadata on the target URI to check if it matches the description.
 	 * Doing that would require having information for the target resource, or fetching such information...
