@@ -24,9 +24,9 @@ class LDPCmdTest extends munit.FunSuite {
 
 	test("fetch included graphs for </People/Berners-Lee/card.acl>") {
 		//build the graphs Data structure
-		val ts: TestServer = ImportsTestServer
+		val ts: TestServer = ImportsDLTestServer
 		val compiler = TestCompiler(ts)
-		val ds: ReqDataSet = fetchWithImports(ts.path("/People/Berners-Lee/card.acl")).foldMap(compiler.run)
+		val ds: ReqDataSet = fetchWithImports(ts.path("/People/Berners-Lee/card.acl")).foldMap(compiler.eval)
 
 		//count the graphs in ds
 		def countGr(ds: ReqDataSet): Eval[Int] = Cofree.cata[GraF, Meta, Int](ds) { (meta, d) =>
@@ -38,7 +38,7 @@ class LDPCmdTest extends munit.FunSuite {
 		//return the top NamedGraph of the dataset
 		def toNG(ds: ReqDataSet): Eval[(Uri, Rdf#Graph)] = Now(ds.head.url -> ds.tail.value.graph)
 
-		val ts2: TestServer = ConnectedImportsTestServer
+		val ts2: TestServer = ConnectedImportsDLTestServer
 		val compiler2 = TestCompiler(ts2)
 
 		//check that the output is the same as the full info on the server
@@ -47,7 +47,7 @@ class LDPCmdTest extends munit.FunSuite {
 		assertEquals(Map(namedGraphs.toSeq *), ts.db - ts.path("/People/.acl"))
 
 		//build the graphs Data structure for the altered server
-		val ds2: ReqDataSet = fetchWithImports(ts2.path("/People/Berners-Lee/card.acl")).foldMap(compiler2.run)
+		val ds2: ReqDataSet = fetchWithImports(ts2.path("/People/Berners-Lee/card.acl")).foldMap(compiler2.eval)
 
 		assertEquals(countGr(ds2).value, 4)
 		assertEquals(Map(ds2
@@ -79,11 +79,11 @@ class LDPCmdTest extends munit.FunSuite {
 		//simple Fix as as defined in http://tpolecat.github.io/presentations/cofree/slides#19
 		case class Fix[F[_]](f: F[Fix[F]])
 		type Graphs = Fix[GraF]
-		import WebServers.imports.server
-		import WebServers.imports.server.db
+		import WebServers.importsDL.ws
+		import WebServers.importsDL.ws.db
 
-		val cardAcl = db(server.path("/People/Berners-Lee/card.acl"))
-		val BLAcl = db(server.path("/People/Berners-Lee/.acl"))
+		val cardAcl = db(ws.path("/People/Berners-Lee/card.acl"))
+		val BLAcl = db(ws.path("/People/Berners-Lee/.acl"))
 		// the fixpoints of GF is just a non-empty set of Graphs.
 		val g: Graphs = Fix(GraF(cardAcl, List(
 			Fix(GraF(BLAcl, List()))))

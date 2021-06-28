@@ -9,7 +9,7 @@ import scala.concurrent.Await
 import scala.concurrent.duration.Duration
 import scala.util.{Failure, Success}
 
-case class TestCompiler(val server: TestServer) {
+case class TestCompiler(val ws: TestServer) {
 
 	import RDF.*
 	import RDF.ops.*
@@ -20,9 +20,9 @@ case class TestCompiler(val server: TestServer) {
 
 	given ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
 
-	def run: SolidCmd ~> Id = new (SolidCmd ~> Id) {
+	def eval: SolidCmd ~> Id = new (SolidCmd ~> Id) {
 		def apply[A](cmd: SolidCmd[A]): Id[A] = cmd match
-			case Get(url, f) => server.db.get(url) match
+			case Get(url, f) => ws.db.get(url) match
 				case Some(g) => f(Response(Meta(url, StatusCodes.OK, Seq()), Success(g)))
 				//todo: Create an exception for this that can be re-used
 				case None => f(Response(Meta(url, StatusCodes.NotFound, Seq()), Failure(new Exception("no content"))))

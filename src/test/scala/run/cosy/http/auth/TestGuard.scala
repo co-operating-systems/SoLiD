@@ -4,7 +4,7 @@ import akka.http.scaladsl.model.{HttpMethods, Uri}
 import run.cosy.RDF
 import run.cosy.RDF.*
 import run.cosy.RDF.ops.*
-import run.cosy.ldp.{WebServers,TestServer,ImportsTestServer,TestCompiler}
+import run.cosy.ldp.{WebServers,TestServer,ImportsDLTestServer,TestCompiler}
 
 
 class TestGuard extends munit.FunSuite {
@@ -17,19 +17,35 @@ class TestGuard extends munit.FunSuite {
 	import run.cosy.http.util.UriX.*
 	import run.cosy.ldp.SolidCmd.*
 
+	test("test access to root container resource for simple ACL server") {
+		import WebServers.aclBasic
+		import aclBasic.ws
+		val rootAcl = ws.base / ".acl"
+		val rootUri = ws.base / ""
+
+		val podRdf    = ws.base.toRdf
+		val podRdfAcl = rootAcl.toRdf
+
+		val aclGraph = ws.db(rootAcl)
+		assertEquals(Guard.filterRulesFor(aclGraph, rootUri, GET).nodes.toList, List(podRdfAcl.withFragment("Public")))
+		val answer = Guard.authorizeScript(rootAcl, new Anonymous(), rootUri, GET).foldMap(aclBasic.eval)
+		assert(answer, true)
+	}
+
 
 
 	test("test access to root container resource") {
-		val ts = WebServers.imports.server
-		val rootAcl = ts.pod / ".acl"
-		val rootUri = ts.pod / ""
+		import WebServers.importsDL
+		import importsDL.ws
+		val rootAcl = ws.base / ".acl"
+		val rootUri = ws.base / ""
 
-		val podRdf    = ts.pod.toRdf
+		val podRdf    = ws.base.toRdf
 		val podRdfAcl = rootAcl.toRdf
 
-		val aclGraph = ts.db(rootAcl)
+		val aclGraph = ws.db(rootAcl)
 		assertEquals(Guard.filterRulesFor(aclGraph, rootUri, GET).nodes.toList, List(podRdfAcl.withFragment("Public")))
-		val answer = Guard.authorizeScript(rootAcl, new Anonymous(), rootUri, GET).foldMap(WebServers.imports.run)
+		val answer = Guard.authorizeScript(rootAcl, new Anonymous(), rootUri, GET).foldMap(importsDL.eval)
 		assert(answer, true)
 	}
 

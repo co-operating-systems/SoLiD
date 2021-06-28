@@ -5,7 +5,7 @@ import cats.free.Cofree
 import org.apache.jena.riot.lang.RiotParsers
 import run.cosy.RDF
 import run.cosy.RDF.Prefix.wac
-import run.cosy.ldp.ImportsTestServer.{BLAcl, db}
+import run.cosy.ldp.ImportsDLTestServer.{BLAcl, db}
 import run.cosy.ldp.SolidCmd.*
 
 import java.util.concurrent.TimeUnit
@@ -24,11 +24,11 @@ import run.cosy.RDF.ops.*
  * The setup is illustrated in the diagram
  * https://github.com/solid/authorization-panel/issues/210#issuecomment-838747077
  * */
-object ImportsTestServer extends TestServer:
+object ImportsDLTestServer extends TestServer:
 	import cats.implicits.*
 	import cats.{Applicative, CommutativeApplicative, Eval}
 
-	val pod = Uri("https://w3.org")
+	val base = Uri("https://w3.org")
 
 	//todo: move out to test ontology, so it can be used by test code.
 	val containedIn = URI("http://ont.example/containedIn")
@@ -69,18 +69,18 @@ object ImportsTestServer extends TestServer:
 		path("/People/.acl") -> pplAcl,
 		path("/People/Berners-Lee/.acl") -> BLAcl,
 		path("/People/Berners-Lee/card.acl") -> cardAcl
-	).view.mapValues(g => g.resolveAgainst(pod.toRdf)).toMap
+	)
 
-end ImportsTestServer
+end ImportsDLTestServer
 
 /** A test server where every AC Resource points to its parent ACR */
-object ConnectedImportsTestServer extends TestServer:
-	val pod = Uri("https://w3.org")
+object ConnectedImportsDLTestServer extends TestServer:
+	val base = Uri("https://w3.org")
 
 	// we also want to consider the world where the full import hierarchy is preserved
-	val BLAcl2  = ImportsTestServer.BLAcl union podGr(
+	val BLAcl2  = ImportsDLTestServer.BLAcl union podGr(
 		URI("/People/Berners-Lee/.acl") -- owl.imports ->- URI("/People/.acl")
 	)
 
-	val db = ImportsTestServer.db + (path("/People/Berners-Lee/.acl") -> BLAcl2)
-end ConnectedImportsTestServer
+	val db = ImportsDLTestServer.db + (path("/People/Berners-Lee/.acl") -> BLAcl2)
+end ConnectedImportsDLTestServer
