@@ -24,6 +24,7 @@ object BasicACLTestServer extends TestServer:
 
 	val BLAcl   = podGr( URI("/People/Berners-Lee/.acl#TimRl").a(wac.Authorization)
 		-- wac.agent ->- URI("/People/Berners-Lee/card#i")
+		-- wac.mode ->- wac.Control
 		-- wac.default ->-  URI("/People/Berners-Lee/")
 	) union podGr(
 		URI("/People/Berners-Lee/.acl") -- owl.imports ->- URI("/.acl")
