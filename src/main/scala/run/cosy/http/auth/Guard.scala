@@ -49,13 +49,22 @@ object Guard {
 	 */
 	def authorize(acg: Rdf#Graph, agent: Agent, target: Uri, operation: GMethod): Boolean =
 		val rules = filterRulesFor(acg, target, operation)
-		(rules / wac.agentClass).exists{ pg =>
-			pg.pointer == foaf.Agent
-		} || (rules / wac.agent).exists { pg =>
-			agent match
-				case KeyIdAgent(keyId, _) => pg.graph.select(keyId.toRdf, security.controller, pg.pointer).hasNext
-				case _ => false
+		def ac = (rules / wac.agentClass).exists{ pg =>
+			pg.pointer == foaf.Agent // || todo: fill in authenticated agent, and groups
 		}
+		def ag = {
+			def agents = rules / wac.agent
+			agent match
+			case WebIdAgent(id) =>
+				val webId = id.toRdf
+				agents.exists{ _.pointer == webId }
+			case KeyIdAgent(keyId, _) =>
+				agents.exists(pg => pg.graph.select(keyId.toRdf, security.controller, pg.pointer).hasNext)
+			case _ => false
+		}
+		ac || ag
+	end authorize
+
 
 	/**
 	 * from a graph of rules, return a stream of pointers to the rules that apply to the given target
@@ -75,7 +84,7 @@ object Guard {
 		val rules: PointedGraphs[Rdf] = PointedGraph[Rdf](wac.Authorization, acRulesGraph) /- rdf.`type`
 		//todo: add filter to banana-rdf
 		val it: Iterable[Rdf#Node] = rules.nodes.filter { (node: Rdf#Node) =>
-			acRulesGraph.find(node, wac.mode, modeFor(operation)).hasNext &&
+			modesFor(operation).exists(mode => acRulesGraph.find(node, wac.mode, mode).hasNext) &&
 				(acRulesGraph.select(node, wac.accessTo, targetRsrc).hasNext ||
 					acRulesGraph.select(node, wac.default, ANY).exists { (tr: Rdf#Triple) =>
 						tr.objectt.fold(u => u.toAkka.ancestorOf(target), x => false, z => false)
@@ -83,14 +92,14 @@ object Guard {
 		}
 		PointedGraphs(it, acRulesGraph)
 
-	def modeFor(op: GMethod): Rdf#URI =
+	def modesFor(op: GMethod): List[Rdf#URI] =
 		import run.cosy.ldp.SolidCmd
-		op match
+		val mainMode = op match
 			case GET => wac.Read
 			case PUT => wac.Write
 			case POST => wac.Write
 			case DELETE => wac.Write
-	//case PATCH => wac.Write
+		List(mainMode,wac.Control)
 
 	def authorizeScript(aclUri: Uri, agent: Agent, target: Uri, method: HttpMethod): Script[Boolean] =
 		import akka.actor.typed.Behavior

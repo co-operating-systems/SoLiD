@@ -35,4 +35,5 @@ object KeyIdAgent:
 
 class Anonymous extends Agent
 object WebServerAgent extends Agent
+case class WebIdAgent(uri: Uri) extends Agent
 

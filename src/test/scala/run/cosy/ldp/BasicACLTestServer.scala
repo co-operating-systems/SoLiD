@@ -38,7 +38,7 @@ object BasicACLTestServer extends TestServer:
 
 	val rootACL = podGr(URI("/.acl#Admin").a(wac.Authorization)
 		-- wac.mode ->- wac.Control
-		-- wac.agentClass ->- URI("/Admins#g")
+		-- wac.agent ->- URI("/owner#i")
 		-- wac.default ->- URI("/")
 	) union podGr(
 		URI("/.acl#Public").a(wac.Authorization)
